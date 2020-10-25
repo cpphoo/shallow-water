@@ -36,19 +36,22 @@
 void solution_check(central2d_t* sim)
 {
     int nx = sim->nx, ny = sim->ny;
-    float* u = sim->u;
+    float* U = sim->U;
     float h_sum = 0, hu_sum = 0, hv_sum = 0;
-    float hmin = u[central2d_offset(sim,0,0,0)];
+    float hmin = U[central2d_offset(sim,0,0,0)];
     float hmax = hmin;
-    for (int j = 0; j < ny; ++j)
-        for (int i = 0; i < nx; ++i) {
-            float h = u[central2d_offset(sim,0,i,j)];
-            h_sum += h;
-            hu_sum += u[central2d_offset(sim,1,i,j)];
-            hv_sum += u[central2d_offset(sim,2,i,j)];
-            hmax = fmaxf(h, hmax);
-            hmin = fminf(h, hmin);
-        }
+
+    for (int j = 0; j < ny; ++j) {
+      for (int i = 0; i < nx; ++i) {
+        float h = U[central2d_offset(sim,0,i,j)];
+        h_sum += h;
+        hu_sum += U[central2d_offset(sim,1,i,j)];
+        hv_sum += U[central2d_offset(sim,2,i,j)];
+        hmax = fmaxf(h, hmax);
+        hmin = fminf(h, hmin);
+      } // for (int i = 0; i < nx; ++i) {
+    } // for (int j = 0; j < ny; ++j) {
+
     float cell_area = sim->dx * sim->dy;
     h_sum *= cell_area;
     hu_sum *= cell_area;
@@ -89,7 +92,7 @@ void viz_frame(FILE* fp, central2d_t* sim, int vskip)
         return;
     for (int iy = 0; iy < sim->ny; iy += vskip)
         for (int ix = 0; ix < sim->nx; ix += vskip)
-            fwrite(sim->u + central2d_offset(sim,0,ix,iy),
+            fwrite(sim->U + central2d_offset(sim,0,ix,iy),
                    sizeof(float), 1, fp);
 }
 
@@ -118,7 +121,7 @@ void lua_init_sim(lua_State* L, central2d_t* sim)
 
     int nx = sim->nx, ny = sim->ny, nfield = sim->nfield;
     float dx = sim->dx, dy = sim->dy;
-    float* u = sim->u;
+    float* U = sim->U;
 
     for (int ix = 0; ix < nx; ++ix) {
         float x = (ix + 0.5) * dx;
@@ -129,7 +132,7 @@ void lua_init_sim(lua_State* L, central2d_t* sim)
             lua_pushnumber(L, y);
             lua_call(L, 2, nfield);
             for (int k = 0; k < nfield; ++k)
-                u[central2d_offset(sim,k,ix,iy)] = lua_tonumber(L, k-nfield);
+                U[central2d_offset(sim,k,ix,iy)] = lua_tonumber(L, k-nfield);
             lua_pop(L, nfield);
         }
     }

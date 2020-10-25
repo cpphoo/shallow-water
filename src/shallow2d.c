@@ -178,7 +178,7 @@ void shallow2d_speed( float* cxy,
   U - a field cell by c array stored in column major order. Each row holds the
   three components of U for a particular cell (see page 3 of the document).
 
-  ncell - the number of cells we want to operate on .
+  ncell - the number of cells we want to operate on.
 
   field_stride - the distance in memory between successive fields (components)
   of U. For example, the distance in memory between the h and hu

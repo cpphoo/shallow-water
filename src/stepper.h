@@ -50,11 +50,11 @@ typedef struct central2d_t {
     speed_t speed;
 
     // Storage
-    float* u;
-    float* v;
-    float* f;
-    float* g;
-    float* scratch;
+    float* U;                // U (see page 3)
+    float* U_half;           // Storage for U at a half step
+    float* FU;               // FU (see page 3)
+    float* GU;               // GU (see page 3)
+    float* scratch;          // Extra space to hold intermediate calculations
 
 } central2d_t;
 
@@ -65,7 +65,7 @@ typedef struct central2d_t {
  * functions.
  *
  */
-central2d_t* central2d_init(float w, float h, int nx, int ny,
+central2d_t* central2d_init(float grid_width, float grid_height, int nx, int ny,
                             int nfield, flux_t flux, speed_t speed,
                             float cfl);
 void central2d_free(central2d_t* sim);
@@ -106,7 +106,7 @@ int central2d_run(central2d_t* sim, float tfinal);
  * for applying the BCs.
  *
  */
-void central2d_periodic(float* u, int nx, int ny, int ng, int nfield);
+void central2d_periodic(float* U, int nx, int ny, int ng, int nfield);
 
 //ldoc off
 #endif /* STEPPER_H */
