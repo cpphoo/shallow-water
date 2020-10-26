@@ -101,7 +101,6 @@ void shallow2dv_speed(float* restrict cxy,
   float cx = cxy[0];
   float cy = cxy[1];
 
-  #pragma omp parallel for
   // Cycle through the first ncell elements of h, hu, and hv.
   for (int i = 0; i < ncell; ++i) {
     // find h, 1/h (h_inv) and sqrt(gh) for this cell.
@@ -147,15 +146,15 @@ void shallow2d_flux(float* FU,
   FU, GU, and U. For example, the distance in memory between the h and hu
   componenets of U for the ith cell is field_stride. */
 
-  shallow2dv_flux(FU,
-                  FU + field_stride,
-                  FU + 2*field_stride,
-                  GU,
-                  GU + field_stride,
-                  GU + 2*field_stride,
-                  U,
-                  U + field_stride,
-                  U + 2*field_stride,
+  shallow2dv_flux(FU,                           // FU_h
+                  FU + field_stride,            // FU_hu
+                  FU + 2*field_stride,          // FU_hv
+                  GU,                           // GU_h
+                  GU + field_stride,            // GU_hu
+                  GU + 2*field_stride,          // GU_hv
+                  U,                            // h
+                  U + field_stride,             // hu
+                  U + 2*field_stride,           // hv
                   g,
                   ncell);
 } // void shallow2d_flux(float* FU,...
@@ -179,16 +178,16 @@ void shallow2d_speed( float* cxy,
   U - a field cell by c array stored in column major order. Each row holds the
   three components of U for a particular cell (see page 3 of the document).
 
-  ncell - the number of cells we want to operate on .
+  ncell - the number of cells we want to operate on.
 
   field_stride - the distance in memory between successive fields (components)
   of U. For example, the distance in memory between the h and hu
   componenets of U for the ith cell is field_stride. */
 
   shallow2dv_speed( cxy,
-                    U,
-                    U + field_stride,
-                    U + 2*field_stride,
+                    U,                           // h
+                    U + field_stride,            // hu
+                    U + 2*field_stride,          // hv
                     g,
                     ncell);
 } // void shallow2d_speed(float* cxy,...
