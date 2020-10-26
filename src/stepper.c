@@ -430,27 +430,49 @@ void central2d_predict(float* restrict U_half,
 static
 void central2d_correct_sd(float* restrict s,
                           float* restrict d,
-                          const float* restrict Ux,
-                          const float* restrict Uy,
-                          const float* restrict U,
-                          const float* restrict FU,
-                          const float* restrict GU,
+                          const float* restrict Uk_x,
+                          const float* restrict Uk_y,
+                          const float* restrict Uk,
+                          const float* restrict FUk,
+                          const float* restrict GUk,
                           float dtcdx2,
                           float dtcdy2,
                           int xlo,
                           int xhi)
 {
-  /* Description: This function calculuates s and d. */
+  /* Description: This function calculuates s and d, which are used to
+  updated U_half in central2d_correct, for a row of the grid. We calculate s
+  and d for each i in {xlo, xlo + 1,... xhi - 1}.
 
-  for (int ix = xlo; ix < xhi; ++ix)
+  What are the arguments?
+  s, d - values which are used to calculate the "corrected" value of U_half.
+
+  Uk_x - the x derivative of the kth field/component/subarray of U.
+
+  Uk_y - the y derivative of the kth field/component/subarray of U.
+
+  Uk, FUk, GUk - the addresses of a row in the kth field/component/subarrays of
+  U, FU, and GK.
+
+  dtcdx2 - (1/2)(dt/dx) (see central2d_step)
+
+  dtcdy2 - (1/2)(dt/dy) (see central2d_step)
+
+  xhi, xlo - the upper and lower indicies within a particular row of the cell
+  grid upon which we want to calculate s and d. */
+
+  for (int ix = xlo; ix < xhi; ++ix) {
     s[ix] =
-      0.2500f * (U [ix] + U [ix + 1]) +
-      0.0625f * (Ux[ix] - Ux[ix + 1]) +
-      dtcdx2  * (FU [ix] - FU [ix + 1]);
-  for (int ix = xlo; ix < xhi; ++ix)
+      0.2500f * (Uk [ix] + Uk [ix + 1]) +
+      0.0625f * (Uk_x[ix] - Uk_x[ix + 1]) +
+      dtcdx2  * (FUk [ix] - FUk [ix + 1]);
+  } // for (int ix = xlo; ix < xhi; ++ix) {
+
+  for (int ix = xlo; ix < xhi; ++ix) {
     d[ix] =
-      0.0625f * (Uy[ix] + Uy[ix + 1]) +
-      dtcdy2  * (GU [ix] + GU [ix + 1]);
+      0.0625f * (Uk_y[ix] + Uk_y[ix + 1]) +
+      dtcdy2  * (GUk [ix] + GUk [ix + 1]);
+  } // for (int ix = xlo; ix < xhi; ++ix) {
 } // void central2d_correct_sd(float* restrict s,
 
 
@@ -468,8 +490,8 @@ void central2d_correct(float* restrict U_half,
                        int xhi,
                        int ylo,
                        int yhi,
-                       int nx,
-                       int ny,
+                       int nx_all,
+                       int ny_all,
                        int nfield)
 {
   /* Description: This function "corrects" U_half (U on a grid which is
@@ -500,39 +522,39 @@ void central2d_correct(float* restrict U_half,
 
   nfield - the number of fields/subarrays/components in U, U_half, FU, FG. */
 
-  assert(0 <= xlo && xlo < xhi && xhi <= nx);
-  assert(0 <= ylo && ylo < yhi && yhi <= ny);
+  assert(0 <= xlo && xlo < xhi && xhi <= nx_all);
+  assert(0 <= ylo && ylo < yhi && yhi <= ny_all);
 
 
   // these hold the derivatives of u in the x and y directions.
-  float* restrict Ux = scratch;
-  float* restrict Uy = scratch +   nx;
+  float* restrict U_x = scratch;
+  float* restrict U_y = scratch +   nx_all;
 
-  float* restrict s0 = scratch + 2*nx;
-  float* restrict d0 = scratch + 3*nx;
-  float* restrict s1 = scratch + 4*nx;
-  float* restrict d1 = scratch + 5*nx;
+  float* restrict s0 = scratch + 2*nx_all;
+  float* restrict d0 = scratch + 3*nx_all;
+  float* restrict s1 = scratch + 4*nx_all;
+  float* restrict d1 = scratch + 5*nx_all;
 
   for (int k = 0; k < nfield; ++k) {
 
     // Thus, U_half_k/Uk/FUk/GUk are the starting addresses of the kth sub-arrays
     // of U_half/U/FU/GU.
-    float*       restrict U_half_k = U_half + k*ny*nx;
-    const float* restrict Uk = U + k*ny*nx;
-    const float* restrict FUk = FU + k*ny*nx;
-    const float* restrict GUk = GU + k*ny*nx;
+    float*       restrict U_half_k = U_half + k*ny_all*nx_all;
+    const float* restrict Uk  = U  + k*ny_all*nx_all;
+    const float* restrict FUk = FU + k*ny_all*nx_all;
+    const float* restrict GUk = GU + k*ny_all*nx_all;
 
     // Calculate derivatives of U in the x and y directions, use them to find
     // s and d.
-    limited_deriv1(Ux + 1, Uk + ylo*nx + 1, nx - 2);
-    limited_derivk(Uy + 1, Uk + ylo*nx + 1, nx - 2, nx);
+    limited_deriv1(U_x + 1, Uk + ylo*nx_all + 1, nx_all - 2);
+    limited_derivk(U_y + 1, Uk + ylo*nx_all + 1, nx_all - 2, nx_all);
     central2d_correct_sd( s1,
                           d1,
-                          Ux,
-                          Uy,
-                          Uk + ylo*nx,
-                          FUk + ylo*nx,
-                          GUk + ylo*nx,
+                          U_x,                             // Uk_x
+                          U_y,                             // Uk_y
+                          Uk + ylo*nx_all,                 // Uk
+                          FUk + ylo*nx_all,                // FUk
+                          GUk + ylo*nx_all,                // GUk
                           dtcdx2,
                           dtcdy2,
                           xlo,
@@ -546,15 +568,15 @@ void central2d_correct(float* restrict U_half,
 
       // calculate derivatives of U in the x and y directions, use these to
       // calculate s and d.
-      limited_deriv1(Ux + 1, Uk + (iy + 1)*nx + 1, nx - 2);
-      limited_derivk(Uy + 1, Uk + (iy + 1)*nx + 1, nx - 2, nx);
+      limited_deriv1(U_x + 1, Uk + (iy + 1)*nx_all + 1, nx_all - 2);
+      limited_derivk(U_y + 1, Uk + (iy + 1)*nx_all + 1, nx_all - 2, nx_all);
       central2d_correct_sd( s1,
                             d1,
-                            Ux,
-                            Uy,
-                            Uk + (iy + 1)*nx,
-                            FUk + (iy + 1)*nx,
-                            GUk + (iy + 1)*nx,
+                            U_x,                           // Uk_x
+                            U_y,                           // Uk_y
+                            Uk + (iy + 1)*nx_all,          // Uk
+                            FUk + (iy + 1)*nx_all,         // FUk
+                            GUk + (iy + 1)*nx_all,         // GUk
                             dtcdx2,
                             dtcdy2,
                             xlo,
@@ -562,7 +584,7 @@ void central2d_correct(float* restrict U_half,
 
       // Update U_half.
       for (int ix = xlo; ix < xhi; ++ix) {
-        U_half_k[ix + iy*nx] = (s1[ix] + s0[ix]) - (d1[ix] - d0[ix]);
+        U_half_k[ix + iy*nx_all] = (s1[ix] + s0[ix]) - (d1[ix] - d0[ix]);
       } //  for (int ix = xlo; ix < xhi; ++ix) {
     } // for (int iy = ylo; iy < yhi; ++iy) {
   } // for (int k = 0; k < nfield; ++k) {
@@ -643,10 +665,10 @@ void central2d_step(float* restrict U,
                     GU,
                     dtcdx2,
                     dtcdy2,
-                    ng - io,
-                    nx + ng - io,
-                    ng - io,
-                    ny + ng - io,
+                    ng - io,           // xlo
+                    nx + ng - io,      // xhi
+                    ng - io,           // ylo
+                    ny + ng - io,      // yhi
                     nx_all,
                     ny_all,
                     nfield);
