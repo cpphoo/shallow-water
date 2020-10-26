@@ -1,4 +1,4 @@
-PLATFORM=gcc
+PLATFORM=mac
 include ../config/Makefile.in.$(PLATFORM)
 
 # ===
