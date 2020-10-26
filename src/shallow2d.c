@@ -146,15 +146,15 @@ void shallow2d_flux(float* FU,
   FU, GU, and U. For example, the distance in memory between the h and hu
   componenets of U for the ith cell is field_stride. */
 
-  shallow2dv_flux(FU,
-                  FU + field_stride,
-                  FU + 2*field_stride,
-                  GU,
-                  GU + field_stride,
-                  GU + 2*field_stride,
-                  U,
-                  U + field_stride,
-                  U + 2*field_stride,
+  shallow2dv_flux(FU,                           // FU_h
+                  FU + field_stride,            // FU_hu
+                  FU + 2*field_stride,          // FU_hv
+                  GU,                           // GU_h
+                  GU + field_stride,            // GU_hu
+                  GU + 2*field_stride,          // GU_hv
+                  U,                            // h
+                  U + field_stride,             // hu
+                  U + 2*field_stride,           // hv
                   g,
                   ncell);
 } // void shallow2d_flux(float* FU,...
@@ -185,9 +185,9 @@ void shallow2d_speed( float* cxy,
   componenets of U for the ith cell is field_stride. */
 
   shallow2dv_speed( cxy,
-                    U,
-                    U + field_stride,
-                    U + 2*field_stride,
+                    U,                           // h
+                    U + field_stride,            // hu
+                    U + 2*field_stride,          // hv
                     g,
                     ncell);
 } // void shallow2d_speed(float* cxy,...
