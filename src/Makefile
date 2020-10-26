@@ -8,7 +8,7 @@ lshallow: ldriver.o shallow2d.o stepper.o
 	$(CC) $(CFLAGS) $(LUA_CFLAGS) -o $@ $^ $(LUA_LIBS) $(LIBS)
 
 
-lshallow_parallel: ldriver.o shallow2d_parallel.o stepper_parallel.o
+lshallow_parallel: ldriver_parallel.o shallow2d_parallel.o stepper_parallel.o
 	$(CC) $(CFLAGS) $(LUA_CFLAGS) -o $@ $^ $(LUA_LIBS) $(LIBS)
 
 ldriver.o: ldriver.c shallow2d.h
