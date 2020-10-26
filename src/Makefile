@@ -14,6 +14,10 @@ lshallow_parallel: ldriver_parallel.o shallow2d_parallel.o stepper_parallel.o
 ldriver.o: ldriver.c shallow2d.h
 	$(CC) $(CFLAGS) $(LUA_CFLAGS) -c $<
 
+ldriver_parallel.o: ldriver_parallel.c shallow2d.h
+	$(CC) $(CFLAGS) $(LUA_CFLAGS) -c $<
+
+
 
 shallow2d.o: shallow2d.c
 	$(CC) $(CFLAGS) -c $<

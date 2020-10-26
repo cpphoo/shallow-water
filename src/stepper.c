@@ -239,7 +239,6 @@ void central2d_periodic(float* restrict U,
   r, b, t, br, bg and tg are similar. If we think about it, the locations of
   l, r, b, t, lg, lr, bg, and tg should make sense. (draw a picture, it helps!) */
   int l = nx,   lg = 0;
-  int l = nx,   lg = 0;
   int r = ng,   rg = nx + ng;
   int b = ny*s, bg = 0;
   int t = ng*s, tg = (ny + ng)*s;

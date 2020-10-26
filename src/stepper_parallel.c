@@ -182,7 +182,7 @@ int central2d_offset( central2d_t* sim,
                    int nx,
                    int ny,
                    int stride_dst,
-                   int strid_src)
+                   int stride_src)
  {
    /* Description: This copies an nx by ny part of src to dest.
    Both src and dst are assumed to be in ROW MAJOR order.
@@ -255,7 +255,6 @@ void central2d_periodic(float* restrict U,
   r, b, t, br, bg and tg are similar. If we think about it, the locations of
   l, r, b, t, lg, lr, bg, and tg should make sense. (draw a picture, it helps!) */
   int l = nx,   lg = 0;
-  int l = nx,   lg = 0;
   int r = ng,   rg = nx + ng;
   int b = ny*s, bg = 0;
   int t = ng*s, tg = (ny + ng)*s;
@@ -273,16 +272,16 @@ void central2d_periodic(float* restrict U,
 } // void central2d_periodic(float* restrict U,
 
 
-void central2d_partition_BC(float* restrict U,
-                            int nx,
-                            int ny,
-                            int ng,
-                            int nfield
-                            float* restrict U_global,
-                            int nx_global,
-                            int ny_global,
-                            int xlow_local,
-                            int ylow_local)
+void central2d_local_BC(float* restrict U,
+                        int nx,
+                        int ny,
+                        int ng,
+                        int nfield,
+                        float* restrict U_global,
+                        int nx_global,
+                        int ny_global,
+                        int xlow_local,
+                        int ylow_local)
 {
   /* Description: This function applies boundary conditions to U a piece of
   the partition of the global U array.
@@ -338,31 +337,168 @@ void central2d_partition_BC(float* restrict U,
   lg denotes the address of the bottom right (min x and y indicies) of the left
   boundary cells in U.
 
-  r, b, t, rg, bg, and tg are similar. */
-  int l = xlow_local + ylow_local*nx_global_all;
+  r, b, t, rg, bg, and tg are similar.
+
+  To get these, we first need to find the address of the cell of U_global (for a
+  particular field/component/subarray) which corresponds to the bottom left
+  ghost cell for the U local.
+
+  To do this, let's think about which row and column this corresponds to. There
+  are nx_global_all columns in the global grid (with ghost cells). The first ng
+  of those columns hold ghost cells (which we used to apply BCs!). By
+  definition, xlow_local tells us which column (of canoncal cells) in U_global
+  corresponds to the first column of canonical cells of U. Thus, the first
+  column of caonical cells in U coresponds to column xlow_local + ng in U_global
+  The first column of ghost cells is ng columns to the left of that. Thus, the
+  column index in U_global corresonding to the leftmost column of ghost cells in
+  U is xlow_local + ng - ng = xlow_local.
+
+  Using analagous logic, we can conclude that the bottom row of ghost cells in U
+  corresponds to row ylow_local + ng - ng = ylow_local in U_global.
+
+  Since there are nx_global_all entries per row of U_global (which is stored in
+  column major order), the address in U_global corresponding to the bottom
+  left most ghost cell in U is xlow_local + ylow_local*nx_global_all. We call
+  this quantity offset. */
+  int offset = xlow_local + ylow_local*nx_global_all;
+
+  int l = offset;
   int lg = 0;
 
-  int r = (xlow_local + nx + ng) + ylow_local*nx_global_all;
-  rg = nx + ng;
+  int r = offset + (nx + ng);
+  int rg = nx + ng;
 
-  int b = xlow_local + ylow_local*nx_global_all;
+  int b = offset;
   int bg = 0;
 
-  int t = xlow_local + (ylow_local + ny + ng)*nx_global_all;
+  int t = offset + (ny + ng)*nx_global_all;
   int tg = (ny + ng)*nx_all;
 
   for (int k = 0; k < nfield; ++k) {
     // Get the address of the kth subarray of U and U_global.
-    float* Uk = U + k*field_stride;
-    float* Uglobal_k = U_global + k*field_stride_global;
+    float* Uk_local = U + k*field_stride;
+    float* Uk_global = U_global + k*field_stride_global;
 
-    copy_subgrid(Uk + lg, Uglobal_k + l, ng,     ny_all, s, s_global);
-    copy_subgrid(Uk + rg, Uglobal_k + r, ng,     ny_all, s, s_global);
-    copy_subgrid(Uk + tg, Uglobal_k + t, nx_all, ng,     s, s_global);
-    copy_subgrid(Uk + bg, Uglobal_k + b, nx_all, ng,     s, s_global);
+    copy_subgrid(Uk_local + lg, Uk_global + l, ng,     ny_all, s, s_global);
+    copy_subgrid(Uk_local + rg, Uk_global + r, ng,     ny_all, s, s_global);
+    copy_subgrid(Uk_local + tg, Uk_global + t, nx_all, ng,     s, s_global);
+    copy_subgrid(Uk_local + bg, Uk_global + b, nx_all, ng,     s, s_global);
   } // for (int k = 0; k < nfield; ++k) {
-} // void central2d_periodic(float* restrict U,
+} // void central2d_local_BC(float* restrict U,...
 
+
+void central2d_local_to_global(float* restrict U,
+                               int nx,
+                               int ny,
+                               int ng,
+                               int nfield,
+                               float* restrict U_global,
+                               int nx_global,
+                               int ny_global,
+                               int xlow_local,
+                               int ylow_local)
+{
+  /* Description: This function is used to map the first and last ng rows of
+  canonical cells in U to their corresponding entries in U_global.
+
+  What are the arguments?
+  U - the U array of a central2d structure for a piece of the global grid.
+
+  nx - number of canonical cells in the x direction of the grid
+
+  ny - the number of canonical cells in the y direction of the grid
+
+  ng - number of layers of ghost cells (the first and las ng rows of U are
+  ghost cells. Likewise, the first and last ng columns of U are ghost cells).
+
+  nfield - the number of fields/componenets/subarrays in U.
+
+  U_global - the U array for the global grid.
+
+  nx_global - the number of canonical cells in the x direction of the global
+  grid.
+
+  ny_global - the number of canonical cells in the y direction of the global
+  grid.
+
+  xlow_local, ylow_local - these tell us how U fits into U local. In
+  particular, the first row and column of canonical cells in U corresponds to
+  the xlow_local row and ylow_local column of the global U. */
+
+  // Stride and number per field for local U.
+  int nx_all = nx + 2*ng;
+  int ny_all = ny + 2*ng;
+  int s = nx_all;
+  int field_stride = nx_all*ny_all;
+
+  // Stried and number per field for global U.
+  int nx_global_all = nx_global + 2*ng;
+  int ny_global_all = ny_global + 2*ng;
+  int s_global = nx_global_all;
+  int field_stride_global = nx_global_all*ny_global_all;
+
+  /* Find the addresses of the top, bottom, left, and right most canonical
+  cells within U and U_global.
+
+  Increasing the row index increases the y value. Increasing the column index
+  increases the x value. Thus, the top of the grid corresponds to the last row.
+  Likewise, the right of the grid corresponds to the last column.
+
+  l_local denotes the address of the bottom right (min x and y indicies) cell
+  in U_global which corresponds to the bottom right canonical cell in U.
+
+  l_global denotes the address of the bottom right caonical cell in U.
+
+  r_local, r_global, b_local, b_global, t_local, and t_global are similar.
+
+  To get these, we first need to find the address of the cell of U_global (for a
+  particular field/component/subarray) which corresponds to the bottom left
+  caonical cell in U local.
+
+  To do this, let's think about which row and column this corresponds to. There
+  are nx_global_all columns in the global grid (with ghost cells). The first ng
+  of those columns hold ghost cells (which we used to apply BCs!). By
+  definition, xlow_local tells us which column (of canoncal cells) in U_global
+  corresponds to the first column of canonical cells of U. Thus, the first
+  column of caonical cells in U coresponds to column xlow_local + ng in U_global
+
+  Using analagous logic, we can conclude that the bottom row of caonical in U
+  corresponds to row ylow_local + ng in U_global.
+
+  Since there are nx_global_all entries per row of U_global (which is stored in
+  column major order), the address in U_global corresponding to the bottom
+  left most ghost cell in U is (xlow_local + ng) + (ylow_local + ng)*nx_global_all.
+  We call this quantity offset_global.
+
+  Similarly, we find the address within U of the bottom left most caonical cell.
+  This quantity, which we call offset_local, is equal to ng + ng*nx_all (think
+  about it) */
+  int offset_global = (xlow_local + ng) + (ylow_local + ng)*nx_global_all;
+  int offset_local = ng + ng*nx_all;
+
+  int l_local  = offset_local;
+  int l_global = offset_global;
+
+  int r_local  = offset_local  + nx;
+  int r_global = offset_global + nx;
+
+  int b_local  = offset_local;
+  int b_global = offset_global;
+
+  int t_local  = offset_local  + ny*nx_all;
+  int t_global = offset_global + ny*nx_global_all;
+
+  for (int k = 0; k < nfield; ++k) {
+    // Get the address of the kth subarray of U and U_global.
+    float* Uk_local  = U + k*field_stride;
+    float* Uk_global = U_global + k*field_stride_global;
+
+    copy_subgrid(Uk_global + l_global, Uk_local + l_local, ng,     ny,     s_global, s);
+    copy_subgrid(Uk_global + r_global, Uk_local + r_local, ng,     ny,     s_global, s);
+    copy_subgrid(Uk_global + t_global, Uk_local + t_local, nx,     ng,     s_global, s);
+    copy_subgrid(Uk_global + b_global, Uk_local + b_local, nx,     ng,     s_global, s);
+  } // for (int k = 0; k < nfield; ++k) {
+} // void central2d_local_to_global(float* restrict U,
 
 
 
@@ -822,7 +958,7 @@ int central2d_xrun(float* restrict U,
                    float dy,
                    float cfl,
                    float* restrict U_global,
-                   float* restrict scratch_global
+                   float* restrict scratch_global,
                    int nx_global,
                    int ny_global,
                    const int xlow_local,
@@ -901,16 +1037,16 @@ int central2d_xrun(float* restrict U,
     } // #pragma omp single
 
     /* Get boundary information for U from U_global */
-    central2d_partition_BC(U,
-                           nx,
-                           ny,
-                           ng,
-                           nfield
-                           U_global,
-                           nx_global,
-                           ny_global,
-                           xlow_local,
-                           ylow_local);
+    central2d_local_BC(U,
+                       nx,
+                       ny,
+                       ng,
+                       nfield,
+                       U_global,
+                       nx_global,
+                       ny_global,
+                       xlow_local,
+                       ylow_local);
 
     /* Calculate maximum wave speed in the x and y directions, use this and cfl
     to determine dt.
@@ -987,7 +1123,21 @@ int central2d_xrun(float* restrict U,
     nstep += 2;
 
     // copy boundary of U to corresponding entries of U global
+    central2d_local_to_global(U,
+                              nx,
+                              ny,
+                              ng,
+                              nfield,
+                              U_global,
+                              nx_global,
+                              ny_global,
+                              xlow_local,
+                              ylow_local);
 
+    /* Wait until all threads are done copying their data into U. We need
+    to do this because at the start of the next time step, we're going to
+    apply periodic BCs, and that will only give the result we want if each
+    thread has written its cells into U_global. */
     #pragma omp barrier
   } // while (!done) {
 
@@ -1037,7 +1187,7 @@ int central2d_run(central2d_t* sim_local,
                         sim_local->dy,
                         sim_local->cfl,
                         sim->U,                  // U_global
-                        sim->scratch             // scratch_global
+                        sim->scratch,            // scratch_global
                         sim->nx,                 // nx_global
                         sim->ny,                 // ny_global
                         xlow_local,

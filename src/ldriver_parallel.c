@@ -215,13 +215,13 @@ int run_sim(lua_State* L)
 
   //////////////////////////////////////////////////////////////////////////////
   // Begin Parallel region!
-  const int n_rows = 2;
-  const int n_cols = 2;
+  const int n_rows = 1;
+  const int n_cols = 1;
 
   double tcompute = 0;
 
   // First, make sure that openMP is defined... if not, then abort!
-  #ifndef(_OPENMP)
+  #ifndef _OPENMP
     printf("openMP not defined. Aborting\n");
     abort();
   #endif
@@ -293,7 +293,7 @@ int run_sim(lua_State* L)
     into the local U array. */
     float* U_local = sim_local->U;
     float* U = sim -> U;
-    for(int k = 0; k < nfield; ++k) {
+    for(int k = 0; k < 3; ++k) {  // 3 = nfield
       for(int iy = 0; iy < ny_local; ++iy) {
         for(int ix = 0; ix < nx_local; ++ix) {
           /* We need to copy a piece of the global U to the local U.
@@ -304,7 +304,7 @@ int run_sim(lua_State* L)
           U_local[central2d_offset(sim_local, k, ix, iy)] = U[central2d_offset(sim, k, xlow_local + ix , ylow_local + iy)];
         } // for(int ix = 0; ix < sim->nx; ++ix) {
       } // for(int iy = 0; iy < sim->ny; ++iy) {
-    } // for(int k = 0; k < nfield; ++k) {
+    } // for(int k = 0; k < 3; ++k) {
 
     // wait for all threads to set up their local arrays.
     #pragma omp barrier
@@ -323,7 +323,8 @@ int run_sim(lua_State* L)
 
       // Each threads needs to have pushed its local U to the global one at this
       // point!
-      #pragma omp single {
+      #pragma omp single
+      {
         solution_check(sim);
         tcompute += elapsed;
         printf("  Time: %e (%e for %d steps)\n", elapsed, elapsed/nstep, nstep);
@@ -332,7 +333,7 @@ int run_sim(lua_State* L)
     } // for (int i = 0; i < frames; ++i) {
 
     // Free the local sim structure.
-    centrl2d_free(sim_local);
+    central2d_free(sim_local);
   } // #pragma omp parallel num_threads(4)
 
   printf("Total compute time: %e\n", tcompute);
