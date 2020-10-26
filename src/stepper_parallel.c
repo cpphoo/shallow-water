@@ -176,23 +176,38 @@ int central2d_offset( central2d_t* sim,
  * integers `p` and `q`.
  */
 
-static inline
-void copy_subgrid(float* restrict dst,
-                  const float* restrict src,
-                  int nx,
-                  int ny,
-                  int stride)
-{
-  /* Description: This just copies an nx by ny part of src to dest.
-  Both src and dst are assumed to be in COLUMN MAJOR order and have the same
-  number of rows (stried) */
+ static inline
+ void copy_subgrid(float* restrict dst,
+                   const float* restrict src,
+                   int nx,
+                   int ny,
+                   int stride_dst,
+                   int strid_src)
+ {
+   /* Description: This copies an nx by ny part of src to dest.
+   Both src and dst are assumed to be in ROW MAJOR order.
 
-  for (int iy = 0; iy < ny; ++iy) {
-    for (int ix = 0; ix < nx; ++ix) {
-      dst[ix + iy*stride] = src[ix + iy*stride];
-    } // for (int ix = 0; ix < nx; ++ix) {
-  } // for (int iy = 0; iy < ny; ++iy) {
-} // void copy_subgrid(float* restrict dst,...
+   What are the arguments?
+   dst - the destination of the copy
+
+   src - the source of the copy
+
+   nx - the number of cells in the x direction to be copied.
+
+   ny - the number of cells in the y direction to be copied.
+
+   stride_dst - the distance (in memory) between successive elements of a column
+   of dst. Equivalently, the size (in memory) of a row of dst.
+
+   stride_src - the distance (in memory) between successive elements of a column
+   of src. Equivalently, the size (in memory) of a row of src. */
+
+   for (int iy = 0; iy < ny; ++iy) {
+     for (int ix = 0; ix < nx; ++ix) {
+       dst[ix + iy*stride_dst] = src[ix + iy*stride_src];
+     } // for (int ix = 0; ix < nx; ++ix) {
+   } // for (int iy = 0; iy < ny; ++iy) {
+ } // void copy_subgrid(float* restrict dst,...
 
 
 void central2d_periodic(float* restrict U,
@@ -225,29 +240,129 @@ void central2d_periodic(float* restrict U,
   int s = nx_all;
   int field_stride = nx_all*ny_all;
 
-  // Offsets of left, right, top, and bottom data blocks and ghost blocks
-  //
-  // Increasing the row index increases the y value. Increasing the column index
-  // increases the x value. Thus, the top of the grid corresponds to the last row.
-  // Likewise, the right of the grid corresponds to the last column. If we think
-  // about it that way, the locations of l, r, b, t, lg, lr, bg, and tg should make sense.
-  // (draw a picture, it helps!)
+  /* Offsets of left, right, top, and bottom data blocks and ghost blocks
+
+  Increasing the row index increases the y value. Increasing the column index
+  increases the x value. Thus, the top of the grid corresponds to the last row.
+  Likewise, the right of the grid corresponds to the last column.
+
+  l denotes the address of the bottom right (min x and y indicies) of the cells
+  in U which will become the left boundary of the ghost cells in U.
+
+  lg denotes the address of the bottom right (min x and y indicies) of the left
+  boundary cells in U.
+
+  r, b, t, br, bg and tg are similar. If we think about it, the locations of
+  l, r, b, t, lg, lr, bg, and tg should make sense. (draw a picture, it helps!) */
+  int l = nx,   lg = 0;
   int l = nx,   lg = 0;
   int r = ng,   rg = nx + ng;
   int b = ny*s, bg = 0;
-  int t = ng*s, tg = (nx + ng)*s;
+  int t = ng*s, tg = (ny + ng)*s;
 
   // Copy data into ghost cells on each side
   for (int k = 0; k < nfield; ++k) {
     // Get the address of the kth subarray of U.
     float* Uk = U + k*field_stride;
 
-    copy_subgrid(Uk + lg, Uk + l, ng,     ny_all, s);
-    copy_subgrid(Uk + rg, Uk + r, ng,     ny_all, s);
-    copy_subgrid(Uk + tg, Uk + t, nx_all, ng,     s);
-    copy_subgrid(Uk + bg, Uk + b, nx_all, ng,     s);
+    copy_subgrid(Uk + lg, Uk + l, ng,     ny_all, s, s);
+    copy_subgrid(Uk + rg, Uk + r, ng,     ny_all, s, s);
+    copy_subgrid(Uk + tg, Uk + t, nx_all, ng,     s, s);
+    copy_subgrid(Uk + bg, Uk + b, nx_all, ng,     s, s);
   } // for (int k = 0; k < nfield; ++k) {
 } // void central2d_periodic(float* restrict U,
+
+
+void central2d_partition_BC(float* restrict U,
+                            int nx,
+                            int ny,
+                            int ng,
+                            int nfield
+                            float* restrict U_global,
+                            int nx_global,
+                            int ny_global,
+                            int xlow_local,
+                            int ylow_local)
+{
+  /* Description: This function applies boundary conditions to U a piece of
+  the partition of the global U array.
+  U is an nfield by nx_all by ny_all array. We think of U as a sequence of
+  nfield sub-arrays, each of size nx_all by ny_all. Each sub array is stored
+  in ROW MAJOR order.
+
+  What are the arguments?
+  U - the U array of a central2d structure for a piece of the global grid.
+
+  nx - number of canonical cells in the x direction of the grid
+
+  ny - the number of canonical cells in the y direction of the grid
+
+  ng - number of layers of ghost cells (the first and las ng rows of U are
+  ghost cells. Likewise, the first and last ng columns of U are ghost cells).
+
+  nfield - the number of fields/componenets/subarrays in U.
+
+  U_global - the U array for the global grid.
+
+  nx_global - the number of canonical cells in the x direction of the global
+  grid.
+
+  ny_global - the number of canonical cells in the y direction of the global
+  grid.
+
+  xlow_local, ylow_local - these tell us how U fits into U local. In
+  particular, the first row and column of canonical cells in U corresponds to
+  the xlow_local row and ylow_local column of the global U. */
+
+  // Stride and number per field for local U.
+  int nx_all = nx + 2*ng;
+  int ny_all = ny + 2*ng;
+  int s = nx_all;
+  int field_stride = nx_all*ny_all;
+
+  // Stried and number per field for global U.
+  int nx_global_all = nx_global + 2*ng;
+  int ny_global_all = ny_global + 2*ng;
+  int s_global = nx_global_all;
+  int field_stride_global = nx_global_all*ny_global_all;
+
+  /* Offsets of left, right, top, and bottom data blocks and ghost blocks
+
+  Increasing the row index increases the y value. Increasing the column index
+  increases the x value. Thus, the top of the grid corresponds to the last row.
+  Likewise, the right of the grid corresponds to the last column.
+
+  l denotes the address of the bottom right (min x and y indicies) of the cells
+  in U_global which will become the left boundary of the ghost cells in U.
+
+  lg denotes the address of the bottom right (min x and y indicies) of the left
+  boundary cells in U.
+
+  r, b, t, rg, bg, and tg are similar. */
+  int l = xlow_local + ylow_local*nx_global_all;
+  int lg = 0;
+
+  int r = (xlow_local + nx + ng) + ylow_local*nx_global_all;
+  rg = nx + ng;
+
+  int b = xlow_local + ylow_local*nx_global_all;
+  int bg = 0;
+
+  int t = xlow_local + (ylow_local + ny + ng)*nx_global_all;
+  int tg = (ny + ng)*nx_all;
+
+  for (int k = 0; k < nfield; ++k) {
+    // Get the address of the kth subarray of U and U_global.
+    float* Uk = U + k*field_stride;
+    float* Uglobal_k = U_global + k*field_stride_global;
+
+    copy_subgrid(Uk + lg, Uglobal_k + l, ng,     ny_all, s, s_global);
+    copy_subgrid(Uk + rg, Uglobal_k + r, ng,     ny_all, s, s_global);
+    copy_subgrid(Uk + tg, Uglobal_k + t, nx_all, ng,     s, s_global);
+    copy_subgrid(Uk + bg, Uglobal_k + b, nx_all, ng,     s, s_global);
+  } // for (int k = 0; k < nfield; ++k) {
+} // void central2d_periodic(float* restrict U,
+
 
 
 
@@ -705,16 +820,23 @@ int central2d_xrun(float* restrict U,
                    float tfinal,
                    float dx,
                    float dy,
-                   float cfl)
+                   float cfl,
+                   float* restrict U_global,
+                   float* restrict scratch_global
+                   int nx_global,
+                   int ny_global,
+                   const int xlow_local,
+                   const int ylow_local)
 {
   /* Description: This function runs a simulation!
 
   What are the arguments?
-  U, U_half, FU, GU - members (of the same name) of the central2d structure.
+  U, U_half, FU, GU - members (of the same name) of the central2d structure for
+  a piece of the partition of the global array.
 
-  nx - number of columns of canonical cells
+  nx - number of columns of canonical cells in U.
 
-  ny  - number of rows of canonical cells.
+  ny  - number of rows of canonical cells in U.
 
   ng - number of layers of ghost cells.
 
@@ -731,9 +853,23 @@ int central2d_xrun(float* restrict U,
 
   dx, dy - dimensions of a cell.
 
-  cfl - used to determine the time step. */
+  cfl - used to determine the time step.
 
+  U_global - a pointer to the U array of the global sim.
 
+  scratch_global - a pointer to the scratch array in the global sim structure.
+  This variable is shared between the threads/used to faciliate communication
+  between them.
+
+  nx_global - number of rows of canonical cells in U_global.
+
+  ny_global - number of rows of canonical cells in U_global.
+
+  xlow_local - the rows in sim_local's U array correspond to rows xlow_local to
+  xlow_local + nx in U.
+
+  ylow_local - the columns in sim_local's U array correspond to columns
+  ylow_local to ylow_local + ny in U.*/
 
   // Set up for the main loop!
   int nstep = 0;
@@ -744,21 +880,67 @@ int central2d_xrun(float* restrict U,
 
   while (!done) {
     float cxy[2] = {1.0e-15f, 1.0e-15f};
-    /* What's going on here?
+    /* What's going on here ( ^ )?
     We set the elements of cxy to small but non-zero values so that when we
-    calculate dt, we don’t divide by zero. */
+    calculate dt, we don’t divide by zero! */
 
-    // Apply periodic boundary conditions.
-    central2d_periodic(U, nx, ny, ng, nfield);
+    /* Apply periodic boundary conditions to U_global. This ensures that the
+    ghost cells of U_global can easily be pulled into the ghost cells of each
+    processors U. */
 
-    // Calculate maximum wave speed in the x and y directions, use this ad cfl
-    // to determine dt.
+    /* one way to improve this would be to eliminate the single directive.
+    Throw in for directives inside of this function, so that the different
+    threads complete different parts of the BCs in parallel. */
+    #pragma omp single
+    {
+      central2d_periodic( U_global,
+                          nx_global,
+                          ny_global,
+                          ng,
+                          nfield);
+    } // #pragma omp single
 
-    // This needs to be done on each proc, but we need a global minimum value!!!!
-    // I think we can do this by calculating it on each proc, then taking the
-    // minimum over the procs.
+    /* Get boundary information for U from U_global */
+    central2d_partition_BC(U,
+                           nx,
+                           ny,
+                           ng,
+                           nfield
+                           U_global,
+                           nx_global,
+                           ny_global,
+                           xlow_local,
+                           ylow_local);
+
+    /* Calculate maximum wave speed in the x and y directions, use this and cfl
+    to determine dt.
+
+    To do this, each processor calculates the maximum x and y velocity for
+    it's U. One by one, these threads then store their maximums in the first
+    two elements of scratch_global (the first element of sim's scratch member)
+    to determine the minimum velocity in the x and y diections (accross the
+    whole grid). These values are then used to calculate dt. We need this
+    synchronization so that each thread ends up with the same value of dt.
+
+    This is essentially doing what an MPI reduce operation would do. */
     speed(cxy, U, nx_all*ny_all, nx_all*ny_all);
-    float dt = cfl / fmaxf(cxy[0]/dx, cxy[1]/dy);
+
+    #pragma omp single nowait
+    {
+      /* prepare the first two elements of scratch_global to hold the global
+      maximum cy and cy */
+      scratch_global[0] = 0;
+      scratch_global[1] = 0;
+    } // #pragma omp single nowait
+
+    #pragma omp critical
+    {
+      scratch_global[0] = fmax(cxy[0], scratch_global[0]);
+      scratch_global[1] = fmax(cxy[1], scratch_global[1]);
+    } // #pragma omp critical
+    #pragma omp barrier
+
+    float dt = cfl / fmaxf(scratch_global[0]/dx, scratch_global[1]/dy);
 
     // Check if we are ready to stop looping. This is how the loop eventually
     // stops and ensures that we always stop at t final (think about it).
@@ -803,6 +985,10 @@ int central2d_xrun(float* restrict U,
                     dy);
     t += 2*dt;
     nstep += 2;
+
+    // copy boundary of U to corresponding entries of U global
+
+    #pragma omp barrier
   } // while (!done) {
 
   // return the number of time steps.
@@ -814,9 +1000,7 @@ int central2d_xrun(float* restrict U,
 int central2d_run(central2d_t* sim_local,
                   central2d_t* sim,
                   const int xlow_local,
-                  const int xhigh_local,
                   const int ylow_local,
-                  const int yhigh_local,
                   float tfinal)
 {
   /* Description: This is a wrapper for central2d_xrun.
@@ -825,15 +1009,15 @@ int central2d_run(central2d_t* sim_local,
   sim_local - a central2d structure which corresponds to a piece of the global
   grid.
 
-  sim_global - a central2d strcuture which corresponds to the global grid.
+  sim - a central2d strcuture which corresponds to the global grid.
 
   U_global - a pointer to the U array of the global simulation
 
-  xlow_local, xhigh_local - the rows in sim_local's U array correspond to rows
-  xlow_local to xhigh_local-1 in U.
+  xlow_local - the rows in sim_local's U array correspond to rows xlow_local to
+  xlow_local + sim_local->nx in U.
 
-  ylow_local, yhigh_local - the columns in sim_local's U array correspond to
-  columns ylow_local to yhigh_local-1 in U.
+  ylow_local - the columns in sim_local's U array correspond to columns
+  ylow_local to ylow_local + sim_local->ny in U.
 
   tfinal - the final time in the simulation */
 
@@ -851,5 +1035,11 @@ int central2d_run(central2d_t* sim_local,
                         tfinal,
                         sim_local->dx,
                         sim_local->dy,
-                        sim_local->cfl);
+                        sim_local->cfl,
+                        sim->U,                  // U_global
+                        sim->scratch             // scratch_global
+                        sim->nx,                 // nx_global
+                        sim->ny,                 // ny_global
+                        xlow_local,
+                        ylow_local);
 } // int central2d_run(central2d_t* sim_local,...

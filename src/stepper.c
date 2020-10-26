@@ -224,17 +224,25 @@ void central2d_periodic(float* restrict U,
   int s = nx_all;
   int field_stride = nx_all*ny_all;
 
-  // Offsets of left, right, top, and bottom data blocks and ghost blocks
-  //
-  // Increasing the row index increases the y value. Increasing the column index
-  // increases the x value. Thus, the top of the grid corresponds to the last row.
-  // Likewise, the right of the grid corresponds to the last column. If we think
-  // about it that way, the locations of l, r, b, t, lg, lr, bg, and tg should make sense.
-  // (draw a picture, it helps!)
+  /* Offsets of left, right, top, and bottom data blocks and ghost blocks
+
+  Increasing the row index increases the y value. Increasing the column index
+  increases the x value. Thus, the top of the grid corresponds to the last row.
+  Likewise, the right of the grid corresponds to the last column.
+
+  l denotes the address of the bottom right (min x and y indicies) of the cells
+  in U which will become the left boundary of the ghost cells in U.
+
+  lg denotes the address of the bottom right (min x and y indicies) of the left
+  boundary cells in U.
+
+  r, b, t, br, bg and tg are similar. If we think about it, the locations of
+  l, r, b, t, lg, lr, bg, and tg should make sense. (draw a picture, it helps!) */
+  int l = nx,   lg = 0;
   int l = nx,   lg = 0;
   int r = ng,   rg = nx + ng;
   int b = ny*s, bg = 0;
-  int t = ng*s, tg = (nx + ng)*s;
+  int t = ng*s, tg = (ny + ng)*s;
 
   // Copy data into ghost cells on each side
   for (int k = 0; k < nfield; ++k) {

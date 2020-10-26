@@ -92,9 +92,7 @@ int  central2d_offset(central2d_t* sim, int k, int ix, int iy);
 int central2d_run(central2d_t* sim_local,
                   central2d_t* sim,
                   const int xlow_local,
-                  const int xhigh_local,
                   const int ylow_local,
-                  const int yhigh_local,
                   float tfinal);
 /**
  * ### Applying boundary conditions
@@ -111,6 +109,17 @@ int central2d_run(central2d_t* sim_local,
  *
  */
 void central2d_periodic(float* U, int nx, int ny, int ng, int nfield);
+
+void central2d_partition_BC(float* restrict U,
+                            int nx,
+                            int ny,
+                            int ng,
+                            int nfield
+                            float* restrict U_global,
+                            int nx_global,
+                            int ny_global,
+                            int xlow_local,
+                            int ylow_local);
 
 //ldoc off
 #endif /* STEPPER_H */

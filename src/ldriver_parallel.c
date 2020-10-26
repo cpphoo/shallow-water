@@ -212,6 +212,8 @@ int run_sim(lua_State* L)
   solution_check(sim);
   viz_frame(viz, sim, vskip);
 
+
+  //////////////////////////////////////////////////////////////////////////////
   // Begin Parallel region!
   const int n_rows = 2;
   const int n_cols = 2;
@@ -221,6 +223,7 @@ int run_sim(lua_State* L)
   // First, make sure that openMP is defined... if not, then abort!
   #ifndef(_OPENMP)
     printf("openMP not defined. Aborting\n");
+    abort();
   #endif
 
   #pragma omp parallel num_threads(n_rows*n_cols)
@@ -303,6 +306,9 @@ int run_sim(lua_State* L)
       } // for(int iy = 0; iy < sim->ny; ++iy) {
     } // for(int k = 0; k < nfield; ++k) {
 
+    // wait for all threads to set up their local arrays.
+    #pragma omp barrier
+
     /* Now, at long last, the local simulation structures are set up and ready
     to go! Let's cycle through the timesteps! */
     for (int i = 0; i < frames; ++i) {
@@ -310,9 +316,7 @@ int run_sim(lua_State* L)
       int nstep = central2d_run(sim_local,
                                 sim,
                                 xlow_local,
-                                xhigh_local,
                                 ylow_local,
-                                yhigh_local,
                                 ftime);
       double t1 = omp_get_wtime();
       double elapsed = t1-t0;
