@@ -1,4 +1,4 @@
-#include "stepper.h"
+#include "stepper_parallel.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -127,7 +127,8 @@ int central2d_offset( central2d_t* sim,
     k = 2 means "hv" component
 
   ix, iy - the x, y indicies of a canonical cell (within the canonical grid) that
-  we want to access. */
+  we want to access. ix should be in the set {0, 1... nx-1} and iy should be
+  in the set {0, 1... ny-1} */
 
   // How does this work?
   //
@@ -752,6 +753,10 @@ int central2d_xrun(float* restrict U,
 
     // Calculate maximum wave speed in the x and y directions, use this ad cfl
     // to determine dt.
+
+    // This needs to be done on each proc, but we need a global minimum value!!!!
+    // I think we can do this by calculating it on each proc, then taking the
+    // minimum over the procs.
     speed(cxy, U, nx_all*ny_all, nx_all*ny_all);
     float dt = cfl / fmaxf(cxy[0]/dx, cxy[1]/dy);
 
@@ -806,28 +811,45 @@ int central2d_xrun(float* restrict U,
 
 
 
-int central2d_run(central2d_t* sim, float tfinal)
+int central2d_run(central2d_t* sim_local,
+                  central2d_t* sim,
+                  const int xlow_local,
+                  const int xhigh_local,
+                  const int ylow_local,
+                  const int yhigh_local,
+                  float tfinal)
 {
   /* Description: This is a wrapper for central2d_xrun.
 
   What are the arguments?
-  sim - a central2d object that we want to run a simulation on.
+  sim_local - a central2d structure which corresponds to a piece of the global
+  grid.
+
+  sim_global - a central2d strcuture which corresponds to the global grid.
+
+  U_global - a pointer to the U array of the global simulation
+
+  xlow_local, xhigh_local - the rows in sim_local's U array correspond to rows
+  xlow_local to xhigh_local-1 in U.
+
+  ylow_local, yhigh_local - the columns in sim_local's U array correspond to
+  columns ylow_local to yhigh_local-1 in U.
 
   tfinal - the final time in the simulation */
 
-  return central2d_xrun(sim->U,
-                        sim->U_half,
-                        sim->scratch,
-                        sim->FU,
-                        sim->GU,
-                        sim->nx,
-                        sim->ny,
-                        sim->ng,
-                        sim->nfield,
-                        sim->flux,
-                        sim->speed,
+  return central2d_xrun(sim_local->U,
+                        sim_local->U_half,
+                        sim_local->scratch,
+                        sim_local->FU,
+                        sim_local->GU,
+                        sim_local->nx,
+                        sim_local->ny,
+                        sim_local->ng,
+                        sim_local->nfield,
+                        sim_local->flux,
+                        sim_local->speed,
                         tfinal,
-                        sim->dx,
-                        sim->dy,
-                        sim->cfl);
-} // int central2d_run(central2d_t* sim, float tfinal)
+                        sim_local->dx,
+                        sim_local->dy,
+                        sim_local->cfl);
+} // int central2d_run(central2d_t* sim_local,...

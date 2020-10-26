@@ -89,8 +89,13 @@ int  central2d_offset(central2d_t* sim, int k, int ix, int iy);
  * at the reference grid.
  *
  */
-int central2d_run(central2d_t* sim, float tfinal);
-
+int central2d_run(central2d_t* sim_local,
+                  central2d_t* sim,
+                  const int xlow_local,
+                  const int xhigh_local,
+                  const int ylow_local,
+                  const int yhigh_local,
+                  float tfinal);
 /**
  * ### Applying boundary conditions
  *

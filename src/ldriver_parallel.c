@@ -1,4 +1,4 @@
-#include "stepper.h"
+#include "stepper_parallel.h"
 #include "shallow2d.h"
 
 #ifdef _OPENMP
@@ -168,6 +168,7 @@ void lua_init_sim(lua_State* L, central2d_t* sim)
 
 int run_sim(lua_State* L)
 {
+  // lua set up.
   int n = lua_gettop(L);
   if (n != 1 || !lua_istable(L, 1)) {
     luaL_error(L, "Argument must be a table");
@@ -194,6 +195,7 @@ int run_sim(lua_State* L)
   const char* fname     = luaL_optstring( L, 10, "sim.out");
   lua_pop(L, 9);
 
+  // initialize the global simulation object (which holds the entire grid)
   central2d_t* sim = central2d_init(grid_width,
                                     grid_height,
                                     nx,
@@ -203,39 +205,133 @@ int run_sim(lua_State* L)
                                     shallow2d_speed,
                                     cfl);
 
+  // more lua stuff.
   lua_init_sim(L,sim);
   printf("%g %g %d %d %g %d %g\n", grid_width, grid_height, nx, ny, cfl, frames, ftime);
   FILE* viz = viz_open(fname, sim, vskip);
   solution_check(sim);
   viz_frame(viz, sim, vskip);
 
+  // Begin Parallel region!
+  const int n_rows = 2;
+  const int n_cols = 2;
+
   double tcompute = 0;
-  for (int i = 0; i < frames; ++i) {
-    #ifdef _OPENMP
+
+  // First, make sure that openMP is defined... if not, then abort!
+  #ifndef(_OPENMP)
+    printf("openMP not defined. Aborting\n");
+  #endif
+
+  #pragma omp parallel num_threads(n_rows*n_cols)
+  {
+    // First, check that there are n_rows*n_cols threads
+    if(omp_get_num_threads() != n_rows*n_cols) {
+      printf("Couldn't create enough threads! Wanted %d but got %d\n aborting.\n", n_rows*n_cols, omp_get_num_threads());
+      abort();
+    } // if(omp_get_num_threads() != n_rows*n_cols) {
+
+    /* In this approach, we partition the global grid into a bunch of
+    sub grids. We split the rows of the global grid into n_rows rows and
+    n_cols cols. We assign threads to pieces of the partition based on their
+    thread number.
+
+    Let's do that now. pieces of the partition are indentified by two indicies,
+    p_row and p_col. These specify the row and column (within the partition) of the
+    piece. */
+    int p_row = omp_get_thread_num() % n_rows;
+    int p_col = ((int) omp_get_thread_num()) / ((int) n_rows);
+
+    /* Now that each processor has its sub grid indicies, we can determine which
+    rows and columns (within the global grid) each processor will be responsible
+    for. */
+    const int ny_p = ny / n_rows;
+    int ylow_local = p_row*ny_p;
+    int yhigh_local;
+    if(p_row == n_rows) { yhigh_local = ny; }
+    else { yhigh_local = ylow_local + ny_p; }
+
+    const int nx_p = nx / n_cols;
+    int xlow_local = p_col*nx_p;
+    int xhigh_local;
+    if(p_col == n_cols) { xhigh_local = nx; }
+    else { xhigh_local = xlow_local + nx_p; }
+
+    // Now set up the local simulation structure.
+    const int nx_local = xhigh_local - xlow_local;
+    const int ny_local = yhigh_local - ylow_local;
+    central2d_t* sim_local = central2d_init( grid_width,  // This is wrong, but it's okay... see below.
+                                             grid_height, // This is wrtong, but it's okay... see below.
+                                             nx_local,
+                                             ny_local,
+                                             3,           // nfield
+                                             shallow2d_flux,
+                                             shallow2d_speed,
+                                             cfl);
+
+    /* Why do we pass the global grid_width and grid_height to the initializer
+    for sim_local? Remember, sim_local only deals with a piece of the global
+    grid, so its height and width will be smaller. If we look at the code for
+    the initializer, we'll notice that grid_width and grid_height are only used
+    to calculate dx and dy. Every cell in the global grid has the same size.
+    Thus, dx and dy for each local grid should be equal to that of the global
+    one. When we initialized the global sim variable, it calculated dx and dy.
+    Thus, dx and dy are already known, we just need to get them to sim_local.
+
+    The idea here is to just pass some junk values to central2d_init when
+    initializing sim_local. This initializer will calculate incorrect values for
+    dx and dy (for the local grid). After initialization is done, we will
+    overwrite the faulty values of dx and dy using the ones in sim. */
+    sim_local->dx = sim->dx;
+    sim_local->dy = sim->dy;
+
+    /* Now that sim_local has been initialized, we need to set up its U array.
+    To do that, we need to copy the corresponding part of the global U array
+    into the local U array. */
+    float* U_local = sim_local->U;
+    float* U = sim -> U;
+    for(int k = 0; k < nfield; ++k) {
+      for(int iy = 0; iy < ny_local; ++iy) {
+        for(int ix = 0; ix < nx_local; ++ix) {
+          /* We need to copy a piece of the global U to the local U.
+          The first row of U_local corresponds to row xlow_local in U.
+
+          Likewise, the first column of U_local corresponds to row ylow_local
+          in U. */
+          U_local[central2d_offset(sim_local, k, ix, iy)] = U[central2d_offset(sim, k, xlow_local + ix , ylow_local + iy)];
+        } // for(int ix = 0; ix < sim->nx; ++ix) {
+      } // for(int iy = 0; iy < sim->ny; ++iy) {
+    } // for(int k = 0; k < nfield; ++k) {
+
+    /* Now, at long last, the local simulation structures are set up and ready
+    to go! Let's cycle through the timesteps! */
+    for (int i = 0; i < frames; ++i) {
       double t0 = omp_get_wtime();
-      int nstep = central2d_run(sim, ftime);
+      int nstep = central2d_run(sim_local,
+                                sim,
+                                xlow_local,
+                                xhigh_local,
+                                ylow_local,
+                                yhigh_local,
+                                ftime);
       double t1 = omp_get_wtime();
       double elapsed = t1-t0;
 
-    #elif defined SYSTIME
-      struct timeval t0, t1;
-      gettimeofday(&t0, NULL);
-      int nstep = central2d_run(sim, ftime);
-      gettimeofday(&t1, NULL);
-      double elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_usec - t0.tv_usec)*1e-6;
+      // Each threads needs to have pushed its local U to the global one at this
+      // point!
+      #pragma omp single {
+        solution_check(sim);
+        tcompute += elapsed;
+        printf("  Time: %e (%e for %d steps)\n", elapsed, elapsed/nstep, nstep);
+        viz_frame(viz, sim, vskip);
+      } // #pragma omp single {
+    } // for (int i = 0; i < frames; ++i) {
 
-    #else
-      int nstep = central2d_run(sim, ftime);
-      double elapsed = 0;
-    #endif
+    // Free the local sim structure.
+    centrl2d_free(sim_local);
+  } // #pragma omp parallel num_threads(4)
 
-    solution_check(sim);
-    tcompute += elapsed;
-    printf("  Time: %e (%e for %d steps)\n", elapsed, elapsed/nstep, nstep);
-    viz_frame(viz, sim, vskip);
-  } // for (int i = 0; i < frames; ++i) {
   printf("Total compute time: %e\n", tcompute);
-
   viz_close(viz);
   central2d_free(sim);
   return 0;
