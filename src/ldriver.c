@@ -35,31 +35,31 @@
 
 void solution_check(central2d_t* sim)
 {
-    int nx = sim->nx, ny = sim->ny;
-    float* U = sim->U;
-    float h_sum = 0, hu_sum = 0, hv_sum = 0;
-    float hmin = U[central2d_offset(sim,0,0,0)];
-    float hmax = hmin;
+  int nx = sim->nx, ny = sim->ny;
+  float* U = sim->U;
+  float h_sum = 0, hu_sum = 0, hv_sum = 0;
+  float hmin = U[central2d_offset(sim,0,0,0)];
+  float hmax = hmin;
 
-    for (int j = 0; j < ny; ++j) {
-      for (int i = 0; i < nx; ++i) {
-        float h = U[central2d_offset(sim,0,i,j)];
-        h_sum += h;
-        hu_sum += U[central2d_offset(sim,1,i,j)];
-        hv_sum += U[central2d_offset(sim,2,i,j)];
-        hmax = fmaxf(h, hmax);
-        hmin = fminf(h, hmin);
-      } // for (int i = 0; i < nx; ++i) {
-    } // for (int j = 0; j < ny; ++j) {
+  for (int j = 0; j < ny; ++j) {
+    for (int i = 0; i < nx; ++i) {
+      float h = U[central2d_offset(sim,0,i,j)];
+      h_sum += h;
+      hu_sum += U[central2d_offset(sim,1,i,j)];
+      hv_sum += U[central2d_offset(sim,2,i,j)];
+      hmax = fmaxf(h, hmax);
+      hmin = fminf(h, hmin);
+    } // for (int i = 0; i < nx; ++i) {
+  } // for (int j = 0; j < ny; ++j) {
 
-    float cell_area = sim->dx * sim->dy;
-    h_sum *= cell_area;
-    hu_sum *= cell_area;
-    hv_sum *= cell_area;
-    printf("-\n  Volume: %g\n  Momentum: (%g, %g)\n  Range: [%g, %g]\n",
-           h_sum, hu_sum, hv_sum, hmin, hmax);
-    assert(hmin > 0);
-}
+  float cell_area = sim->dx * sim->dy;
+  h_sum *= cell_area;
+  hu_sum *= cell_area;
+  hv_sum *= cell_area;
+  printf("-\n  Volume: %g\n  Momentum: (%g, %g)\n  Range: [%g, %g]\n",
+         h_sum, hu_sum, hv_sum, hmin, hmax);
+  assert(hmin > 0);
+} // void solution_check(central2d_t* sim)
 
 /**
  * ## I/O
@@ -73,28 +73,34 @@ void solution_check(central2d_t* sim)
 
 FILE* viz_open(const char* fname, central2d_t* sim, int vskip)
 {
-    FILE* fp = fopen(fname, "w");
-    if (fp) {
-        float xy[2] = {sim->nx/vskip, sim->ny/vskip};
-        fwrite(xy, sizeof(float), 2, fp);
-    }
-    return fp;
-}
+  FILE* fp = fopen(fname, "w");
+
+  if (fp) {
+    float xy[2] = {sim->nx/vskip, sim->ny/vskip};
+    fwrite(xy, sizeof(float), 2, fp);
+  } // if (fp) {
+
+  return fp;
+} // FILE* viz_open(const char* fname, central2d_t* sim, int vskip)
 
 void viz_close(FILE* fp)
 {
-    fclose(fp);
-}
+  fclose(fp);
+} // void viz_close(FILE* fp)
 
 void viz_frame(FILE* fp, central2d_t* sim, int vskip)
 {
-    if (!fp)
-        return;
-    for (int iy = 0; iy < sim->ny; iy += vskip)
-        for (int ix = 0; ix < sim->nx; ix += vskip)
-            fwrite(sim->U + central2d_offset(sim,0,ix,iy),
-                   sizeof(float), 1, fp);
-}
+  if (!fp) {
+    return;
+  } // if (!fp) {
+
+  for (int iy = 0; iy < sim->ny; iy += vskip) {
+    for (int ix = 0; ix < sim->nx; ix += vskip) {
+      fwrite(sim->U + central2d_offset(sim,0,ix,iy),
+             sizeof(float), 1, fp);
+    } // for (int ix = 0; ix < sim->nx; ix += vskip) {
+  } // for (int iy = 0; iy < sim->ny; iy += vskip) {
+} // void viz_frame(FILE* fp, central2d_t* sim, int vskip)
 
 /**
  * ## Lua driver routines
@@ -115,30 +121,35 @@ void viz_frame(FILE* fp, central2d_t* sim, int vskip)
 
 void lua_init_sim(lua_State* L, central2d_t* sim)
 {
-    lua_getfield(L, 1, "init");
-    if (lua_type(L, -1) != LUA_TFUNCTION)
-        luaL_error(L, "Expected init to be a string");
+  lua_getfield(L, 1, "init");
+  if (lua_type(L, -1) != LUA_TFUNCTION) {
+    luaL_error(L, "Expected init to be a string");
+  } // if (lua_type(L, -1) != LUA_TFUNCTION) {
 
-    int nx = sim->nx, ny = sim->ny, nfield = sim->nfield;
-    float dx = sim->dx, dy = sim->dy;
-    float* U = sim->U;
+  int nx = sim->nx, ny = sim->ny, nfield = sim->nfield;
+  float dx = sim->dx, dy = sim->dy;
+  float* U = sim->U;
 
-    for (int ix = 0; ix < nx; ++ix) {
-        float x = (ix + 0.5) * dx;
-        for (int iy = 0; iy < ny; ++iy) {
-            float y = (iy + 0.5) * dy;
-            lua_pushvalue(L, -1);
-            lua_pushnumber(L, x);
-            lua_pushnumber(L, y);
-            lua_call(L, 2, nfield);
-            for (int k = 0; k < nfield; ++k)
-                U[central2d_offset(sim,k,ix,iy)] = lua_tonumber(L, k-nfield);
-            lua_pop(L, nfield);
-        }
-    }
+  for (int ix = 0; ix < nx; ++ix) {
+    float x = (ix + 0.5) * dx;
 
-    lua_pop(L,1);
-}
+    for (int iy = 0; iy < ny; ++iy) {
+      float y = (iy + 0.5) * dy;
+      lua_pushvalue(L, -1);
+      lua_pushnumber(L, x);
+      lua_pushnumber(L, y);
+      lua_call(L, 2, nfield);
+
+      for (int k = 0; k < nfield; ++k) {
+        U[central2d_offset(sim,k,ix,iy)] = lua_tonumber(L, k-nfield);
+      } // for (int k = 0; k < nfield; ++k) {
+
+      lua_pop(L, nfield);
+    } // for (int iy = 0; iy < ny; ++iy) {
+  } // for (int ix = 0; ix < nx; ++ix) {
+
+  lua_pop(L,1);
+} // void lua_init_sim(lua_State* L, central2d_t* sim)
 
 
 /**
@@ -157,67 +168,75 @@ void lua_init_sim(lua_State* L, central2d_t* sim)
 
 int run_sim(lua_State* L)
 {
-    int n = lua_gettop(L);
-    if (n != 1 || !lua_istable(L, 1))
-        luaL_error(L, "Argument must be a table");
+  int n = lua_gettop(L);
+  if (n != 1 || !lua_istable(L, 1)) {
+    luaL_error(L, "Argument must be a table");
+  } // if (n != 1 || !lua_istable(L, 1)) {
 
-    lua_getfield(L, 1, "w");
-    lua_getfield(L, 1, "h");
-    lua_getfield(L, 1, "cfl");
-    lua_getfield(L, 1, "ftime");
-    lua_getfield(L, 1, "nx");
-    lua_getfield(L, 1, "ny");
-    lua_getfield(L, 1, "vskip");
-    lua_getfield(L, 1, "frames");
-    lua_getfield(L, 1, "out");
+  lua_getfield(L, 1, "w");
+  lua_getfield(L, 1, "h");
+  lua_getfield(L, 1, "cfl");
+  lua_getfield(L, 1, "ftime");
+  lua_getfield(L, 1, "nx");
+  lua_getfield(L, 1, "ny");
+  lua_getfield(L, 1, "vskip");
+  lua_getfield(L, 1, "frames");
+  lua_getfield(L, 1, "out");
 
-    double w     = luaL_optnumber(L, 2, 2.0);
-    double h     = luaL_optnumber(L, 3, w);
-    double cfl   = luaL_optnumber(L, 4, 0.45);
-    double ftime = luaL_optnumber(L, 5, 0.01);
-    int nx       = luaL_optinteger(L, 6, 200);
-    int ny       = luaL_optinteger(L, 7, nx);
-    int vskip    = luaL_optinteger(L, 8, 1);
-    int frames   = luaL_optinteger(L, 9, 50);
-    const char* fname = luaL_optstring(L, 10, "sim.out");
-    lua_pop(L, 9);
+  double grid_width     = luaL_optnumber( L, 2,  2.0);
+  double grid_height    = luaL_optnumber( L, 3,  grid_width);
+  double cfl            = luaL_optnumber( L, 4,  0.45);
+  double ftime          = luaL_optnumber( L, 5,  0.01);
+  int nx                = luaL_optinteger(L, 6,  200);
+  int ny                = luaL_optinteger(L, 7,  nx);
+  int vskip             = luaL_optinteger(L, 8,  1);
+  int frames            = luaL_optinteger(L, 9,  50);
+  const char* fname     = luaL_optstring( L, 10, "sim.out");
+  lua_pop(L, 9);
 
-    central2d_t* sim = central2d_init(w,h, nx,ny,
-                                      3, shallow2d_flux, shallow2d_speed, cfl);
-    lua_init_sim(L,sim);
-    printf("%g %g %d %d %g %d %g\n", w, h, nx, ny, cfl, frames, ftime);
-    FILE* viz = viz_open(fname, sim, vskip);
-    solution_check(sim);
-    viz_frame(viz, sim, vskip);
+  central2d_t* sim = central2d_init(grid_width,
+                                    grid_height,
+                                    nx,
+                                    ny,
+                                    3,                     // nfield
+                                    shallow2d_flux,
+                                    shallow2d_speed,
+                                    cfl);
 
-    double tcompute = 0;
-    for (int i = 0; i < frames; ++i) {
-#ifdef _OPENMP
-        double t0 = omp_get_wtime();
-        int nstep = central2d_run(sim, ftime);
-        double t1 = omp_get_wtime();
-        double elapsed = t1-t0;
-#elif defined SYSTIME
-        struct timeval t0, t1;
-        gettimeofday(&t0, NULL);
-        int nstep = central2d_run(sim, ftime);
-        gettimeofday(&t1, NULL);
-        double elapsed = (t1.tv_sec-t0.tv_sec) + (t1.tv_usec-t0.tv_usec)*1e-6;
-#else
-        int nstep = central2d_run(sim, ftime);
-        double elapsed = 0;
-#endif
-        solution_check(sim);
-        tcompute += elapsed;
-        printf("  Time: %e (%e for %d steps)\n", elapsed, elapsed/nstep, nstep);
-        viz_frame(viz, sim, vskip);
-    }
-    printf("Total compute time: %e\n", tcompute);
+  lua_init_sim(L,sim);
+  printf("%g %g %d %d %g %d %g\n", grid_width, grid_height, nx, ny, cfl, frames, ftime);
+  FILE* viz = viz_open(fname, sim, vskip);
+  solution_check(sim);
+  viz_frame(viz, sim, vskip);
 
-    viz_close(viz);
-    central2d_free(sim);
-    return 0;
-}
+  double tcompute = 0;
+  for (int i = 0; i < frames; ++i) {
+    #ifdef _OPENMP
+      double t0 = omp_get_wtime();
+      int nstep = central2d_run(sim, ftime);
+      double t1 = omp_get_wtime();
+      double elapsed = t1-t0;
+    #elif defined SYSTIME
+      struct timeval t0, t1;
+      gettimeofday(&t0, NULL);
+      int nstep = central2d_run(sim, ftime);
+      gettimeofday(&t1, NULL);
+      double elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_usec - t0.tv_usec)*1e-6;
+    #else
+      int nstep = central2d_run(sim, ftime);
+      double elapsed = 0;
+    #endif
+      solution_check(sim);
+      tcompute += elapsed;
+      printf("  Time: %e (%e for %d steps)\n", elapsed, elapsed/nstep, nstep);
+      viz_frame(viz, sim, vskip);
+  } // for (int i = 0; i < frames; ++i) {
+  printf("Total compute time: %e\n", tcompute);
+
+  viz_close(viz);
+  central2d_free(sim);
+  return 0;
+} // int run_sim(lua_State* L)
 
 
 /**
@@ -234,24 +253,25 @@ int run_sim(lua_State* L)
 
 int main(int argc, char** argv)
 {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s fname args\n", argv[0]);
-        return -1;
-    }
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s fname args\n", argv[0]);
+    return -1;
+  } // if (argc < 2) {
 
-    lua_State* L = luaL_newstate();
-    luaL_openlibs(L);
-    lua_register(L, "simulate", run_sim);
+  lua_State* L = luaL_newstate();
+  luaL_openlibs(L);
+  lua_register(L, "simulate", run_sim);
 
-    lua_newtable(L);
-    for (int i = 2; i < argc; ++i) {
-        lua_pushstring(L, argv[i]);
-        lua_rawseti(L, 1, i-1);
-    }
-    lua_setglobal(L, "args");
+  lua_newtable(L);
+  for (int i = 2; i < argc; ++i) {
+    lua_pushstring(L, argv[i]);
+    lua_rawseti(L, 1, i-1);
+  } // for (int i = 2; i < argc; ++i) {
+  lua_setglobal(L, "args");
 
-    if (luaL_dofile(L, argv[1]))
-        printf("%s\n", lua_tostring(L,-1));
-    lua_close(L);
-    return 0;
-}
+  if (luaL_dofile(L, argv[1])) {
+      printf("%s\n", lua_tostring(L,-1));
+  } // if (luaL_dofile(L, argv[1])) {
+  lua_close(L);
+  return 0;
+} // int main(int argc, char** argv)

@@ -67,8 +67,8 @@ central2d_t* central2d_init(float grid_width,
   // U, V, FU, or GU)
   int nx_all = nx + 2*ng;
   int ny_all = ny + 2*ng;
-  int ncells = nx_all * ny_all;
-  int N  = nfield * ncells;
+  int ncells = nx_all*ny_all;
+  int N  = nfield*ncells;
 
   // Here we allocate a single large block of memory. We split this block
   // into five pieces. The first four go to U, U_half, FU and GU, respectively
@@ -418,7 +418,7 @@ void central2d_predict(float* restrict U_half,
         U/U_half (remember, there are ghost cells!) */
 
         // Calculate the (ix, iy) component of the kth component of U_half!
-        U_half[offset] = U[offset] - dtcdx2 * FUx[ix] - dtcdy2 * GUy[ix];
+        U_half[offset] = U[offset] - dtcdx2*FUx[ix] - dtcdy2*GUy[ix];
       } // for (int ix = 1; ix < nx_all - 1; ++ix) {
     } // for (int iy = 1; iy < ny_all - 1; ++iy) {
   } // for (int k = 0; k < nfield; ++k) {
@@ -750,7 +750,7 @@ int central2d_xrun(float* restrict U,
 
     // Calculate maximum wave speed in the x and y directions, use this ad cfl
     // to determine dt.
-    speed(cxy, U, nx_all * ny_all, nx_all * ny_all);
+    speed(cxy, U, nx_all*ny_all, nx_all*ny_all);
     float dt = cfl / fmaxf(cxy[0]/dx, cxy[1]/dy);
 
     // Check if we are ready to stop looping. This is how the loop eventually
@@ -797,6 +797,8 @@ int central2d_xrun(float* restrict U,
     t += 2*dt;
     nstep += 2;
   } // while (!done) {
+
+  // return the number of time steps.
   return nstep;
 } // int central2d_xrun(float* restrict U,
 
