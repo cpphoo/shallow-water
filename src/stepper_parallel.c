@@ -402,7 +402,9 @@ void central2d_local_to_global(float* restrict U,
                                int ylow_local)
 {
   /* Description: This function is used to map the first and last ng rows of
-  canonical cells in U to their corresponding entries in U_global.
+  canonical cells in U to their corresponding entries in U_global. These
+  elements are the only elements that the threads communicate to one another.
+  Thus, this function gets global U ready for the next time step.
 
   What are the arguments?
   U - the U array of a central2d structure for a piece of the global grid.
@@ -1052,7 +1054,7 @@ int central2d_xrun(float* restrict U,
                    float dy,
                    float cfl,
                    float* restrict U_global,
-                   float* restrict scratch_global,
+                   float* restrict shared_buffer,
                    int nx_global,
                    int ny_global,
                    const int xlow_local,
@@ -1087,9 +1089,9 @@ int central2d_xrun(float* restrict U,
 
   U_global - a pointer to the U array of the global sim.
 
-  scratch_global - a pointer to the scratch array in the global sim structure.
-  This variable is shared between the threads/used to faciliate communication
-  between them.
+  shared_buffer - a pointer to a shared array. This array must have at least
+  1 element . This is used fo faciliate communication between the threads. In
+  particular, we will use this to calculate dt.
 
   nx_global - number of rows of canonical cells in U_global.
 
@@ -1145,37 +1147,40 @@ int central2d_xrun(float* restrict U,
     /* Calculate maximum wave speed in the x and y directions, use this and cfl
     to determine dt.
 
-    To do this, each processor calculates the maximum x and y velocity for
-    it's U. One by one, these threads then store their maximums in the first
-    two elements of scratch_global (the first element of sim's scratch member)
-    to determine the minimum velocity in the x and y diections (accross the
-    whole grid). These values are then used to calculate dt. We need this
-    synchronization so that each thread ends up with the same value of dt.
+    To do this, each thread calculates the maximum x and y velocity for
+    it's U and uses this calculate dt given its data. The threads then one-by-
+    one store their values into the shared buffer.
 
-    This is essentially doing what an MPI reduce operation would do. */
+    Once every thread has written its data to the shared buffer, the buffer
+    contains the minimum dt, which each processor can then use. This is
+    essentially doing what an MPI reduce operation would do, but using openMP
+    to do it. */
+
+    /* calculate dt using the data on our piece of the partition. */
     speed(cxy, U, nx_all*ny_all, nx_all*ny_all);
+    float dt_local = cfl / fmaxf(cxy[0]/dx, cxy[1]/dy);
 
+    /* The first processor to complete its work can initialize the
+    shared buffer (we need to do this, the buffer may contain 0, which would
+    wreak havoc on the rest of the code). */
     #pragma omp single
     {
-      /* prepare the first two elements of scratch_global to hold the global
-      maximum cy and cy */
-      scratch_global[0] = 1.0e-15f;
-      scratch_global[1] = 1.0e-15f;
+      shared_buffer[0] = dt_local;
     } // #pragma omp single
 
+    // Now, each thread writes its data to shared_buffer one by one.
     #pragma omp critical
     {
-      scratch_global[0] = fmax(cxy[0], scratch_global[0]);
-      scratch_global[1] = fmax(cxy[1], scratch_global[1]);
+      shared_buffer[0] = fmin(dt_local, shared_buffer[0]);
     } // #pragma omp critical
     #pragma omp barrier
 
-    cxy[0] = scratch_global[0];
-    cxy[1] = scratch_global[1];
-    float dt = cfl / fmaxf(cxy[0]/dx, cxy[1]/dy);
+    /* shared_buffer[0] now contains the minimum dt (across the threads), we
+    can read it in to move on. */
+    float dt = shared_buffer[0];
 
-    // Check if we are ready to stop looping. This is how the loop eventually
-    // stops and ensures that we always stop at t final (think about it).
+    /* Check if we are ready to stop looping. This is how the loop eventually
+    stops and ensures that we always stop at t final (think about it). */
     if (t + 2*dt >= tfinal) {
       dt = (tfinal - t)/2;
       done = true;
@@ -1237,18 +1242,6 @@ int central2d_xrun(float* restrict U,
     #pragma omp barrier
   } // while (!done) {
 
-  // Write each processor's local U back to global U.
-  central2d_U_to_global_U(U,
-                          nx,
-                          ny,
-                          ng,
-                          nfield,
-                          U_global,
-                          nx_global,
-                          ny_global,
-                          xlow_local,
-                          ylow_local);
-
   // return the number of time steps.
   return nstep;
 } // int central2d_xrun(float* restrict U,
@@ -1295,7 +1288,7 @@ int central2d_run(central2d_t* sim_local,
                         sim_local->dy,
                         sim_local->cfl,
                         sim->U,                  // U_global
-                        sim->scratch,            // scratch_global
+                        sim->scratch,            // shared_buffer
                         sim->nx,                 // nx_global
                         sim->ny,                 // ny_global
                         xlow_local,

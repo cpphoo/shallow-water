@@ -132,5 +132,16 @@ void central2d_local_to_global(float* restrict U,
                                int xlow_local,
                                int ylow_local);
 
+void central2d_U_to_global_U(float* restrict U,
+                             int nx,
+                             int ny,
+                             int ng,
+                             int nfield,
+                             float* restrict U_global,
+                             int nx_global,
+                             int ny_global,
+                             int xlow_local,
+                             int ylow_local);
+
 //ldoc off
 #endif /* STEPPER_H */

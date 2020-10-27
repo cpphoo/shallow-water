@@ -319,16 +319,40 @@ int run_sim(lua_State* L)
                                 ylow_local,
                                 ftime);
       double t1 = omp_get_wtime();
-      double elapsed = t1-t0;
+      double elapsed = t1 - t0;
 
-      // Each threads needs to have pushed its local U to the global one at this
-      // point!
-      #pragma omp single
+      /* IO: Here we print out the state of a system at the end of a frame.
+      To do that, we first need each thread to write its local U to global
+      U. */
+      central2d_U_to_global_U(sim_local->U,
+                              sim_local->nx,
+                              sim_local->ny,
+                              sim_local->ng,
+                              sim_local->nfield,
+                              sim->U,            // U_global
+                              sim->nx,           // nx_global
+                              sim->ny,           // ny_global
+                              xlow_local,
+                              ylow_local);
+      /* Once each thread has finished that (and we really need each thread
+      to be finished), we can print out diagostics on sim and write a frame
+      of sim to file. */
+      #pragma omp barrier
+      #pragma omp sections
       {
-        solution_check(sim);
-        tcompute += elapsed;
-        printf("  Time: %e (%e for %d steps)\n", elapsed, elapsed/nstep, nstep);
-        viz_frame(viz, sim, vskip);
+        // One section to run out diagnostic on U.
+        #pragma omp section
+        {
+          solution_check(sim);
+          tcompute += elapsed;
+          printf("  Time: %e (%e for %d steps)\n", elapsed, elapsed/nstep, nstep);
+        } // #pragma omp section
+
+        // One section to write a frame of U to memory.
+        #pragma omp section
+        {
+          viz_frame(viz, sim, vskip);
+        } // #pragma omp section
       } // #pragma omp single {
     } // for (int i = 0; i < frames; ++i) {
 
