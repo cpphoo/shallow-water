@@ -258,8 +258,8 @@ void central2d_periodic(float* restrict U_global,
   l, r, b, t, lg, lr, bg, and tg should make sense. (draw a picture, it helps!) */
   int l = nx,   lg = 0;
   int r = ng,   rg = nx + ng;
-  int b = ny*s, bg = 0;
   int t = ng*s, tg = (ny + ng)*s;
+  int b = ny*s, bg = 0;
 
   // Copy data into ghost cells on each side
   for (int k = 0; k < nfield; ++k) {
@@ -370,11 +370,11 @@ void central2d_local_BC(float* restrict U,
   int r = offset + (nx + ng);
   int rg = nx + ng;
 
-  int b = offset;
-  int bg = 0;
-
   int t = offset + (ny + ng)*nx_global_all;
   int tg = (ny + ng)*nx_all;
+
+  int b = offset;
+  int bg = 0;
 
   for (int k = 0; k < nfield; ++k) {
     // Get the address of the kth subarray of U and U_global.
@@ -487,11 +487,11 @@ void central2d_local_to_global(float* restrict U,
   int r_local  = offset_local  + (nx - ng);
   int r_global = offset_global + (nx - ng);
 
-  int b_local  = offset_local;
-  int b_global = offset_global;
-
   int t_local  = offset_local  + (ny - ng)*nx_all;
   int t_global = offset_global + (ny - ng)*nx_global_all;
+
+  int b_local  = offset_local;
+  int b_global = offset_global;
 
   for (int k = 0; k < nfield; ++k) {
     // Get the address of the kth subarray of U and U_global.
