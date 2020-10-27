@@ -216,7 +216,7 @@ int run_sim(lua_State* L)
   //////////////////////////////////////////////////////////////////////////////
   // Begin Parallel region!
   const int n_rows = 1;
-  const int n_cols = 1;
+  const int n_cols = 2;
 
   double tcompute = 0;
 

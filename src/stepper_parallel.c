@@ -5,6 +5,8 @@
 #include <math.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <omp.h>
+#include <stdio.h>
 
 //ldoc on
 /**
@@ -176,41 +178,41 @@ int central2d_offset( central2d_t* sim,
  * integers `p` and `q`.
  */
 
- static inline
- void copy_subgrid(float* restrict dst,
-                   const float* restrict src,
-                   int nx,
-                   int ny,
-                   int stride_dst,
-                   int stride_src)
- {
-   /* Description: This copies an nx by ny part of src to dest.
-   Both src and dst are assumed to be in ROW MAJOR order.
+static inline
+void copy_subgrid(float* restrict dst,
+                 const float* restrict src,
+                 int nx,
+                 int ny,
+                 int stride_dst,
+                 int stride_src)
+{
+  /* Description: This copies an nx by ny part of src to dest.
+  Both src and dst are assumed to be in ROW MAJOR order.
 
-   What are the arguments?
-   dst - the destination of the copy
+  What are the arguments?
+  dst - the destination of the copy
 
-   src - the source of the copy
+  src - the source of the copy
 
-   nx - the number of cells in the x direction to be copied.
+  nx - the number of cells in the x direction to be copied.
 
-   ny - the number of cells in the y direction to be copied.
+  ny - the number of cells in the y direction to be copied.
 
-   stride_dst - the distance (in memory) between successive elements of a column
-   of dst. Equivalently, the size (in memory) of a row of dst.
+  stride_dst - the distance (in memory) between successive elements of a column
+  of dst. Equivalently, the size (in memory) of a row of dst.
 
-   stride_src - the distance (in memory) between successive elements of a column
-   of src. Equivalently, the size (in memory) of a row of src. */
+  stride_src - the distance (in memory) between successive elements of a column
+  of src. Equivalently, the size (in memory) of a row of src. */
 
-   for (int iy = 0; iy < ny; ++iy) {
-     for (int ix = 0; ix < nx; ++ix) {
-       dst[ix + iy*stride_dst] = src[ix + iy*stride_src];
-     } // for (int ix = 0; ix < nx; ++ix) {
-   } // for (int iy = 0; iy < ny; ++iy) {
- } // void copy_subgrid(float* restrict dst,...
+  for (int iy = 0; iy < ny; ++iy) {
+    for (int ix = 0; ix < nx; ++ix) {
+      dst[ix + iy*stride_dst] = src[ix + iy*stride_src];
+    } // for (int ix = 0; ix < nx; ++ix) {
+  } // for (int iy = 0; iy < ny; ++iy) {
+} // void copy_subgrid(float* restrict dst,...
 
 
-void central2d_periodic(float* restrict U,
+void central2d_periodic(float* restrict U_global,
                         int nx,
                         int ny,
                         int ng,
@@ -262,12 +264,12 @@ void central2d_periodic(float* restrict U,
   // Copy data into ghost cells on each side
   for (int k = 0; k < nfield; ++k) {
     // Get the address of the kth subarray of U.
-    float* Uk = U + k*field_stride;
+    float* Uk_global = U_global + k*field_stride;
 
-    copy_subgrid(Uk + lg, Uk + l, ng,     ny_all, s, s);
-    copy_subgrid(Uk + rg, Uk + r, ng,     ny_all, s, s);
-    copy_subgrid(Uk + tg, Uk + t, nx_all, ng,     s, s);
-    copy_subgrid(Uk + bg, Uk + b, nx_all, ng,     s, s);
+    copy_subgrid(Uk_global + lg, Uk_global + l, ng,     ny_all, s, s);
+    copy_subgrid(Uk_global + rg, Uk_global + r, ng,     ny_all, s, s);
+    copy_subgrid(Uk_global + tg, Uk_global + t, nx_all, ng,     s, s);
+    copy_subgrid(Uk_global + bg, Uk_global + b, nx_all, ng,     s, s);
   } // for (int k = 0; k < nfield; ++k) {
 } // void central2d_periodic(float* restrict U,
 
@@ -316,13 +318,13 @@ void central2d_local_BC(float* restrict U,
   // Stride and number per field for local U.
   int nx_all = nx + 2*ng;
   int ny_all = ny + 2*ng;
-  int s = nx_all;
+  int stride_local = nx_all;
   int field_stride = nx_all*ny_all;
 
-  // Stried and number per field for global U.
+  // Stride and number per field for global U.
   int nx_global_all = nx_global + 2*ng;
   int ny_global_all = ny_global + 2*ng;
-  int s_global = nx_global_all;
+  int stride_global = nx_global_all;
   int field_stride_global = nx_global_all*ny_global_all;
 
   /* Offsets of left, right, top, and bottom data blocks and ghost blocks
@@ -341,7 +343,7 @@ void central2d_local_BC(float* restrict U,
 
   To get these, we first need to find the address of the cell of U_global (for a
   particular field/component/subarray) which corresponds to the bottom left
-  ghost cell for the U local.
+  ghost cell of U.
 
   To do this, let's think about which row and column this corresponds to. There
   are nx_global_all columns in the global grid (with ghost cells). The first ng
@@ -357,7 +359,7 @@ void central2d_local_BC(float* restrict U,
   corresponds to row ylow_local + ng - ng = ylow_local in U_global.
 
   Since there are nx_global_all entries per row of U_global (which is stored in
-  column major order), the address in U_global corresponding to the bottom
+  ROW MAJOR order), the address in U_global corresponding to the bottom
   left most ghost cell in U is xlow_local + ylow_local*nx_global_all. We call
   this quantity offset. */
   int offset = xlow_local + ylow_local*nx_global_all;
@@ -379,12 +381,13 @@ void central2d_local_BC(float* restrict U,
     float* Uk_local = U + k*field_stride;
     float* Uk_global = U_global + k*field_stride_global;
 
-    copy_subgrid(Uk_local + lg, Uk_global + l, ng,     ny_all, s, s_global);
-    copy_subgrid(Uk_local + rg, Uk_global + r, ng,     ny_all, s, s_global);
-    copy_subgrid(Uk_local + tg, Uk_global + t, nx_all, ng,     s, s_global);
-    copy_subgrid(Uk_local + bg, Uk_global + b, nx_all, ng,     s, s_global);
+    copy_subgrid(Uk_local + lg, Uk_global + l, ng,     ny_all, stride_local, stride_global);
+    copy_subgrid(Uk_local + rg, Uk_global + r, ng,     ny_all, stride_local, stride_global);
+    copy_subgrid(Uk_local + tg, Uk_global + t, nx_all, ng,     stride_local, stride_global);
+    copy_subgrid(Uk_local + bg, Uk_global + b, nx_all, ng,     stride_local, stride_global);
   } // for (int k = 0; k < nfield; ++k) {
 } // void central2d_local_BC(float* restrict U,...
+
 
 
 void central2d_local_to_global(float* restrict U,
@@ -428,13 +431,13 @@ void central2d_local_to_global(float* restrict U,
   // Stride and number per field for local U.
   int nx_all = nx + 2*ng;
   int ny_all = ny + 2*ng;
-  int s = nx_all;
+  int stride_local = nx_all;
   int field_stride = nx_all*ny_all;
 
   // Stried and number per field for global U.
   int nx_global_all = nx_global + 2*ng;
   int ny_global_all = ny_global + 2*ng;
-  int s_global = nx_global_all;
+  int stride_global = nx_global_all;
   int field_stride_global = nx_global_all*ny_global_all;
 
   /* Find the addresses of the top, bottom, left, and right most canonical
@@ -466,8 +469,8 @@ void central2d_local_to_global(float* restrict U,
   corresponds to row ylow_local + ng in U_global.
 
   Since there are nx_global_all entries per row of U_global (which is stored in
-  column major order), the address in U_global corresponding to the bottom
-  left most ghost cell in U is (xlow_local + ng) + (ylow_local + ng)*nx_global_all.
+  ROW MAJOR order), the address in U_global corresponding to the bottom
+  left most caonical cell in U is (xlow_local + ng) + (ylow_local + ng)*nx_global_all.
   We call this quantity offset_global.
 
   Similarly, we find the address within U of the bottom left most caonical cell.
@@ -479,26 +482,117 @@ void central2d_local_to_global(float* restrict U,
   int l_local  = offset_local;
   int l_global = offset_global;
 
-  int r_local  = offset_local  + nx;
-  int r_global = offset_global + nx;
+  int r_local  = offset_local  + (nx - ng);
+  int r_global = offset_global + (nx - ng);
 
   int b_local  = offset_local;
   int b_global = offset_global;
 
-  int t_local  = offset_local  + ny*nx_all;
-  int t_global = offset_global + ny*nx_global_all;
+  int t_local  = offset_local  + (ny - ng)*nx_all;
+  int t_global = offset_global + (ny - ng)*nx_global_all;
 
   for (int k = 0; k < nfield; ++k) {
     // Get the address of the kth subarray of U and U_global.
     float* Uk_local  = U + k*field_stride;
     float* Uk_global = U_global + k*field_stride_global;
 
-    copy_subgrid(Uk_global + l_global, Uk_local + l_local, ng,     ny,     s_global, s);
-    copy_subgrid(Uk_global + r_global, Uk_local + r_local, ng,     ny,     s_global, s);
-    copy_subgrid(Uk_global + t_global, Uk_local + t_local, nx,     ng,     s_global, s);
-    copy_subgrid(Uk_global + b_global, Uk_local + b_local, nx,     ng,     s_global, s);
+    copy_subgrid(Uk_global + l_global, Uk_local + l_local, ng,     ny,     stride_global, stride_local);
+    copy_subgrid(Uk_global + r_global, Uk_local + r_local, ng,     ny,     stride_global, stride_local);
+    copy_subgrid(Uk_global + t_global, Uk_local + t_local, nx,     ng,     stride_global, stride_local);
+    copy_subgrid(Uk_global + b_global, Uk_local + b_local, nx,     ng,     stride_global, stride_local);
   } // for (int k = 0; k < nfield; ++k) {
 } // void central2d_local_to_global(float* restrict U,
+
+
+
+void central2d_U_to_global_U(float* restrict U,
+                             int nx,
+                             int ny,
+                             int ng,
+                             int nfield,
+                             float* restrict U_global,
+                             int nx_global,
+                             int ny_global,
+                             int xlow_local,
+                             int ylow_local)
+{
+  /* Description: This function moves U to global U.
+  U is an nfield by nx_all by ny_all array. We think of U as a sequence of
+  nfield sub-arrays, each of size nx_all by ny_all. Each sub array is stored
+  in ROW MAJOR order.
+
+  What are the arguments?
+  U - the U array of a central2d structure for a piece of the global grid.
+
+  nx - number of canonical cells in the x direction of the grid
+
+  ny - the number of canonical cells in the y direction of the grid
+
+  ng - number of layers of ghost cells (the first and las ng rows of U are
+  ghost cells. Likewise, the first and last ng columns of U are ghost cells).
+
+  nfield - the number of fields/componenets/subarrays in U.
+
+  U_global - the U array for the global grid.
+
+  nx_global - the number of canonical cells in the x direction of the global
+  grid.
+
+  ny_global - the number of canonical cells in the y direction of the global
+  grid.
+
+  xlow_local, ylow_local - these tell us how U fits into U local. In
+  particular, the first row and column of canonical cells in U corresponds to
+  the xlow_local row and ylow_local column of the global U. */
+
+  // Stride and number per field for local U.
+  int nx_all = nx + 2*ng;
+  int ny_all = ny + 2*ng;
+  int stride_local = nx_all;
+  int field_stride = nx_all*ny_all;
+
+  // Stried and number per field for global U.
+  int nx_global_all = nx_global + 2*ng;
+  int ny_global_all = ny_global + 2*ng;
+  int stride_global = nx_global_all;
+  int field_stride_global = nx_global_all*ny_global_all;
+
+  /* Offsets of U in U_global.
+
+  We need to find the address the cell of U_global (for a particular
+  field/component/subarray) which corresponds to the bottom left caonical
+  cell of U.
+
+  To do this, let's think about which row and column this corresponds to. There
+  are nx_global_all columns in the global grid (with ghost cells). The first ng
+  of those columns hold ghost cells (which we used to apply BCs!). By
+  definition, xlow_local tells us which column (of canoncal cells) in U_global
+  corresponds to the first column of canonical cells of U. Thus, the first
+  column of caonical cells in U coresponds to column xlow_local + ng in U_global
+
+  Using analagous logic, we can conclude that the bottom row of canonical cells
+  in U corresponds to row ylow_local + ng in U_global.
+
+  Since there are nx_global_all entries per row of U_global (which is stored in
+  ROW MAJOR order), the address in U_global corresponding to the bottom
+  left most canonical cell in U is (xlow_local + ng) + (ylow_local + ng)*nx_global_all.
+  We call this quantity offset_global.
+
+  Similarly, we find the address within U of the bottom left most caonical cell.
+  This quantity, which we call offset_local, is equal to ng + ng*nx_all (think
+  about it) */
+  int offset_global = (xlow_local + ng) + (ylow_local + ng)*nx_global_all;
+  int offset_local = ng + ng*nx_all;
+
+  for (int k = 0; k < nfield; ++k) {
+    // Get the address of the kth subarray of U and U_global.
+    float* Uk_local = U + k*field_stride;
+    float* Uk_global = U_global + k*field_stride_global;
+
+    // Copy the canonical cells of U to their corresponding locations in U_global
+    copy_subgrid(Uk_global + offset_global, Uk_local + offset_local, nx, ny, stride_global, stride_local);
+  } // for (int k = 0; k < nfield; ++k) {
+} // void central2d_local_BC(float* restrict U,...
 
 
 
@@ -1061,13 +1155,13 @@ int central2d_xrun(float* restrict U,
     This is essentially doing what an MPI reduce operation would do. */
     speed(cxy, U, nx_all*ny_all, nx_all*ny_all);
 
-    #pragma omp single nowait
+    #pragma omp single
     {
       /* prepare the first two elements of scratch_global to hold the global
       maximum cy and cy */
-      scratch_global[0] = 0;
-      scratch_global[1] = 0;
-    } // #pragma omp single nowait
+      scratch_global[0] = 1.0e-15f;
+      scratch_global[1] = 1.0e-15f;
+    } // #pragma omp single
 
     #pragma omp critical
     {
@@ -1076,7 +1170,9 @@ int central2d_xrun(float* restrict U,
     } // #pragma omp critical
     #pragma omp barrier
 
-    float dt = cfl / fmaxf(scratch_global[0]/dx, scratch_global[1]/dy);
+    cxy[0] = scratch_global[0];
+    cxy[1] = scratch_global[1];
+    float dt = cfl / fmaxf(cxy[0]/dx, cxy[1]/dy);
 
     // Check if we are ready to stop looping. This is how the loop eventually
     // stops and ensures that we always stop at t final (think about it).
@@ -1140,6 +1236,18 @@ int central2d_xrun(float* restrict U,
     thread has written its cells into U_global. */
     #pragma omp barrier
   } // while (!done) {
+
+  // Write each processor's local U back to global U.
+  central2d_U_to_global_U(U,
+                          nx,
+                          ny,
+                          ng,
+                          nfield,
+                          U_global,
+                          nx_global,
+                          ny_global,
+                          xlow_local,
+                          ylow_local);
 
   // return the number of time steps.
   return nstep;
