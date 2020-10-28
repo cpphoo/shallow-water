@@ -264,7 +264,7 @@ int run_sim(lua_State* L)
     const int nx_local = xhigh_local - xlow_local;
     const int ny_local = yhigh_local - ylow_local;
     central2d_t* sim_local = central2d_init( grid_width,  // This is wrong, but it's okay... see below.
-                                             grid_height, // This is wrtong, but it's okay... see below.
+                                             grid_height, // This is wrong, but it's okay... see below.
                                              nx_local,
                                              ny_local,
                                              3,           // nfield
@@ -321,22 +321,12 @@ int run_sim(lua_State* L)
       double t1 = omp_get_wtime();
       double elapsed = t1 - t0;
 
-      /* IO: Here we print out the state of a system at the end of a frame.
-      To do that, we first need each thread to write its local U to global
-      U. */
-      central2d_U_to_global_U(sim_local->U,
-                              sim_local->nx,
-                              sim_local->ny,
-                              sim_local->ng,
-                              sim_local->nfield,
-                              sim->U,            // U_global
-                              sim->nx,           // nx_global
-                              sim->ny,           // ny_global
-                              xlow_local,
-                              ylow_local);
-      /* Once each thread has finished that (and we really need each thread
-      to be finished), we can print out diagostics on sim and write a frame
-      of sim to file. */
+      /* IO: At the end of run, each thread writes its local U to global U.
+      Before we can run IO, we need each processor to be done writing to global.
+      Thus, we have a barrier.
+
+      Once everything is synchronized (every thread has written to global U),
+      we can print out diagostics on sim and write a frame of sim to file. */
       #pragma omp barrier
       #pragma omp sections
       {

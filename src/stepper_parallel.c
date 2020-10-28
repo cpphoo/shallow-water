@@ -1242,6 +1242,22 @@ int central2d_xrun(float* restrict U,
     #pragma omp barrier
   } // while (!done) {
 
+  /* Get global U ready for IO: Before we can print out the state of the system
+  (in the visualizer), we need each thread to write its local U to global U
+  (this is because the data must be written to file sequentially... this is
+  easiest to do if all of the data is in one place where one thread can write
+  it out to memory). */
+  central2d_U_to_global_U(U,
+                          nx,
+                          ny,
+                          ng,
+                          nfield,
+                          U_global,            // U_global
+                          nx_global,           // nx_global
+                          ny_global,           // ny_global
+                          xlow_local,
+                          ylow_local);
+
   // return the number of time steps.
   return nstep;
 } // int central2d_xrun(float* restrict U,
