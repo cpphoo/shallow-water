@@ -14,6 +14,8 @@
 #include <assert.h>
 #include <stdio.h>
 
+#include <stdlib.h>
+
 //ldoc on
 /**
  * # Driver code
@@ -215,16 +217,30 @@ int run_sim(lua_State* L)
 
   //////////////////////////////////////////////////////////////////////////////
   // Begin Parallel region!
-  const int n_rows = 1;
-  const int n_cols = 2;
-
-  double tcompute = 0;
-
   // First, make sure that openMP is defined... if not, then abort!
   #ifndef _OPENMP
     printf("openMP not defined. Aborting\n");
     abort();
   #endif
+
+  //  First get the number of threads from the environment
+  //  If the number of threads is null, then set the number number of threads to 1
+  char* s = getenv("OMP_NUM_THREADS");
+
+  int num_threads = 0;
+  if (s != NULL) {
+    num_threads = atoi(s);
+  } 
+
+  if (num_threads == 0) {
+    num_threads = 1;
+  }
+
+  printf("Number of threads: %d\n", num_threads);
+  const int n_rows = num_threads;
+  const int n_cols = 1;
+
+  double tcompute = 0;
 
   #pragma omp parallel num_threads(n_rows*n_cols)
   {
@@ -319,15 +335,10 @@ int run_sim(lua_State* L)
                                 ylow_local,
                                 ftime);
       double t1 = omp_get_wtime();
+
+      // There is a barrier in central2d_run so we only need to use one of the 
+      //  t1 - t0
       double elapsed = t1 - t0;
-
-      /* IO: At the end of run, each thread writes its local U to global U.
-      Before we can run IO, we need each processor to be done writing to global.
-      Thus, we have a barrier.
-
-      Once everything is synchronized (every thread has written to global U),
-      we can print out diagostics on sim and write a frame of sim to file. */
-      #pragma omp barrier
       #pragma omp sections
       {
         // One section to run out diagnostic on U.

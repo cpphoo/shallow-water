@@ -6,6 +6,10 @@ include config/Makefile.in.$(PLATFORM)
 src/lshallow:
 	( cd src ; make PLATFORM=$(PLATFORM) )
 
+# Compile the lshallow with parallel support
+src/lshallow_parallel:
+	( cd src; make PLATFORM=$(PLATFORM) lshallow_parallel )
+
 # ===
 # Run small or big version
 
@@ -14,6 +18,9 @@ run: dam_break.gif
 
 big: src/lshallow
 	src/lshallow tests.lua dam 1000
+
+big_parallel2: src/lshallow_parallel
+	OMP_NUM_THREADS=2 src/lshallow_parallel tests.lua dam 1000
 
 # ===
 # Generate visualizations (animated GIF or MP4)

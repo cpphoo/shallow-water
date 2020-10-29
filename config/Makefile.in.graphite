@@ -1,9 +1,9 @@
 # C compiler and flags
 CC=gcc
-CFLAGS=-pg
+CFLAGS=
 
 # Optimization flags
-OPTFLAGS=-O2 -march=native -fopenmp -ffast-math
+OPTFLAGS=-O3 -march=native -fopenmp -ffast-math
 CFLAGS+=$(OPTFLAGS)
 CXXFLAGS+=$(OPTFLAGS)
 
