@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 
 import numpy as np
 
+from sklearn.linear_model import LinearRegression
+
 
 def main(args):
     serial_time = parse(os.path.join(args.dir, 'serial.txt'))
@@ -24,15 +26,28 @@ def main(args):
 
     parallel_times = np.array(parallel_times)
     serial_times = np.array(serial_times)
+
+
     print("Parallel_times: ", parallel_times)
     print("Serial times: ", serial_times)
     speedup = serial_times / parallel_times
     print("Speedup: ", speedup)
+
+
+    # Fitting a linear regression model 
+    X = np.arange(1, 1+ len(speedup)).reshape(-1, 1)
+    reg = LinearRegression().fit(X, speedup)
+
+    print(reg.coef_)
+    print(reg.intercept_)
     print(num_threads)
     plt.plot([1] + num_threads, speedup, '-*', label='Scaled Speedup')
+    
+    # plot best fitted line 
+    plt.plot(X.flatten(), reg.predict(X).flatten(), '--', label='Best Fitted Line: {:.2f}p+{:.2f}'.format(reg.coef_[0], reg.intercept_))
     plt.xticks([1] + num_threads)
     plt.ylabel('Scaled Speedup')
-    plt.xlabel('Number of threads')
+    plt.xlabel('Number of threads, p')
     plt.grid()
     plt.legend()
 
