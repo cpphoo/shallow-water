@@ -6,7 +6,7 @@ make PLATFORM=graphite src/lshallow_parallel
 
 mkdir weak_scaling
 
-problem_size=1000
+problem_size=500
 echo "Running weak scaling with the serial code"
 src/lshallow tests.lua dam $problem_size > weak_scaling/serial.txt
 
@@ -20,4 +20,4 @@ do
     OMP_NUM_THREADS=$num_thread src/lshallow_parallel tests.lua dam $local_problem_size > weak_scaling/threads_$num_thread.txt
 done
 
-python util/compile_weak_scaling.py --dir weak_scaling --num_threads 2 3 4 5
+python util/compile_weak_scaling.py --dir weak_scaling --num_threads 2 3 4 5 6 7 8 9 10
