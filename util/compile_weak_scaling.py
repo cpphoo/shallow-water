@@ -36,7 +36,10 @@ def main(args):
     plt.grid()
     plt.legend()
 
-    plt.show()
+    if args.show_plot:
+        plt.show()
+    else:
+        plt.savefig(f'{args.dir}.jpg')
 
 
 if __name__ == "__main__":
@@ -45,5 +48,8 @@ if __name__ == "__main__":
                         help="directory that have all output files")
     parser.add_argument('--num_threads', nargs='+', type=int,
                         help='number of threads')
+    parser.add_argument('--show_plot', action='store_true',
+                        help='whether to show the plot')
+
     args = parser.parse_args()
     main(args)
