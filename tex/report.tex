@@ -57,7 +57,7 @@ tabsize=2
 
 \section{Introduction}
 
-In this project, we have tried various ways to optimize and tune the implementation of a finite volume solver for 2D hyperbolic PDEs via a high-resolution finite difference scheme (TODO: cite a reference to Jiang and Tadmor). Our approaches are built upon two central themes: subdomain partitioning and parallelization using OpenMP. Based on the performance analysis, the best tuning we have achieved has (TODO: one-two lines summary of the performance result).
+In this project, we have tried various ways to optimize and tune the implementation of a finite volume solver for 2D hyperbolic PDEs via a high-resolution finite difference scheme (TODO: cite a reference to Jiang and Tadmor). Our approaches are built upon two central themes: sub-domain partitioning and parallelization using OpenMP. Based on the performance analysis, the best tuning we have achieved has (TODO: one-two lines summary of the performance result).
 
 \section{Discussion: Compilation Details}
 
@@ -71,10 +71,10 @@ We used the GCC x.x.x (TODO: @Cheng can you specify any details about the compil
 	\item \texttt{-march=native} --- Optimizes the code for the specific machine architecture.
 \end{itemize}
 
-\section{Discussion: Subdomain Partitioning}
+\section{Discussion: Sub-domain Partitioning}
 
 \subsection{Overview}
-The first approach is to partition the grid data, $U_G$, into $N$ subgrids, $U_i$, each with its own start and end indices for both $x$ (horizontal) and $y$ (vertical) direction. In this report and our implementation, we will often refer to $U_i$ as a local grid, and $U_G$ as the global grid. Assume that each thread will handle each $U_i$ in a parallel manner. The overview below will overlook any parallelization aspect of the logic since more details about parallelization through OpenMP will come in the next section.
+The first approach is to partition the grid data, $U_G$, into $N$ sub-grids, $U_i$, each with its own start and end indices for both $x$ (horizontal) and $y$ (vertical) direction. In this report and our implementation, we will often refer to $U_i$ as a local grid, and $U_G$ as the global grid. Assume that each thread will handle each $U_i$ in a parallel manner. The overview below will overlook any parallelization aspect of the logic since more details about parallelization through OpenMP will come in the next section.
 
 In the underlying CFD method, each cell is updated using the cells that directly neighbor it. In particular, this means that each thread needs to access cells of $U_G$ which lie outside of $U_i$ to update $U_i$ (specifically the cells which form the boundary of $U_i$). However, because information propagates through the simulation at a finite rate, each thread only needs to have access to the cells that directly neighbor its local grid. To enable this, each $U_i$ is padded with a few layers of ``Ghost'' cells, which hold a few layers of cells from other threads' local grids. These ghost cells are periodically updated to ensure that each thread can accurately update its local grid. As in Dr. Bindel's original code, the global grid is also padded with a few layers of ghost cells, but those are used to implement periodic boundary conditions.
 
@@ -88,9 +88,9 @@ The rest of the main loop logic is the same as the original work, except that we
 
 \subsection{Implementation Details}
 
-Only some of the noteworthy code snippets, which will help understanding the implementation details, are exposed in this section.
+Only some of the noteworthy code snippets, which will help understanding the implementation details, are discussed in this section. The interested reader is encouraged to see our full implementation on our Github repository, which includes myriad comments for clear exposition.
 
-In order to apply the idea of subdomain partitioning, we need to determine $N$, the number of partitions to create. To generalize our logic, we dynamically determine the number of partitions at runtime by detecting $p$, the number of threads running, and let $N = p$.
+In order to apply the idea of sub-domain partitioning, we need to determine $N$, the number of partitions to create. To generalize our logic, we dynamically determine the number of partitions at runtime by detecting $p$, the number of threads running, and let $N = p$.
 
 
 \begin{lstlisting}[language=C]
@@ -113,7 +113,10 @@ const int n_rows = num_threads;
 const int n_cols = 1;
 \end{lstlisting}
 
-\texttt{n\_row} and \texttt{n\_col} are used to compute the location (\texttt{nx\_local} and \texttt{ny\_local}) in $U_G$ that corresponds to each $U_i$. Note that $\texttt{n\_row} = N$ and $\texttt{n\_col} = 1$, because we are exploiting the fact that matrices follow row major ordering in our code. Initialize each $U_i$ as shown below.
+\texttt{n\_row} and \texttt{n\_col}, are used to calculate two variables, \texttt{xlow\_local} and \texttt{ylow\_local}.
+\texttt{xlow\_local} specifies which row of $U_G$ the bottom row of $U_i$ corresponds to. \texttt{ylow\_local} specifies which column of $U_G$ the left column of $U_i$ corresponds to.
+These variables are used to compute the location (\texttt{nx\_local} and \texttt{ny\_local}) in $U_G$ that corresponds to each cell of $U_i$.
+Note that $\texttt{n\_row} = N$ and $\texttt{n\_col} = 1$, because we are exploiting the fact that matrices follow row major ordering in our code. This approach will, therefore, improve cache usage when threads read from and write to $U_g$. We initialize each $U_i$ as shown below.
 
 \begin{lstlisting}[language=C]
 // ldriver_parallel.c
@@ -123,7 +126,7 @@ for(int k = 0; k < 3; ++k) {  // 3 = nfield
   for(int iy = 0; iy < ny_local; ++iy) {
     for(int ix = 0; ix < nx_local; ++ix) {
       U_local[central2d_offset(sim_local, k, ix, iy)]
-        = U[central2d_offset(sim, k, xlow_local + ix, ylow_local + iy)];
+        = U[central2offset(sim, k, xlow_local + ix, ylow_local + iy)];
     }
   }
 }
@@ -132,16 +135,16 @@ for(int k = 0; k < 3; ++k) {  // 3 = nfield
 \texttt{stepper\_parallel.c} contains the main logic described in the overview. In addition to the provided functions, we introduce three new functions, each with the following functionalities:
 
 \begin{itemize}
-	\item \texttt{central2d\_local\_BC} --- Applies boundary conditions to from $U_G$ to $U_i$.
+	\item \texttt{central2d\_local\_BC} --- Used to fetch $U_i$'s ghost cells from $U_g$.
 	\item \texttt{central2d\_local\_to\_global} --- Copies the boundary of $U_i$ back to $U_G$.
 	\item \texttt{central2d\_U\_to\_global\_U} --- Copies the canonical cells of $U_i$ back to corresponding locations in $U_G$.
 \end{itemize}
 
 \section{Discussion: OpenMP Parallelization}
 
-The aforementioned subdomain partitioning involves handling $N$ disjoint partitions, which means each of them can be handled in a parallel manner. \texttt{\#pragma omp} directives are used to ensure proper setup of parallel processing of each thread.
+The aforementioned sub-domain partitioning involves handling $N$ disjoint partitions, each of which can be handled in parallel. \texttt{\#pragma omp} directives are used to ensure proper setup of parallel processing of each thread.
 
-As soon as we figure out $p$, the number of threads, we can initialize each $U_i$ and its corresponding location in the global grid $U_G$ from the thread number assuming row-wise partitioning. It's necessary to set the barrier before running a simulation so that all threads finish up their $U_i$ initialization.
+Once we figure out $p$, the number of threads, we can initialize each $U_i$ and its corresponding location in the global grid $U_G$ from the thread number assuming row-wise partitioning. It's necessary to set the barrier before running a simulation so that all threads finish up their $U_i$ initialization.
 
 \begin{lstlisting}[language=C]
 // ldriver_parallel.c
@@ -179,7 +182,7 @@ Once all threads are ready with their initialization phase, run the simulation f
     ...
 \end{lstlisting}
 
-Before exiting the main loop, we copy boundary of $U_i$ back to $U_G$. This needs to be done because at the start of the next time step, we're going to apply periodic boundary conditions, and that will only give the result we want if each thread has written its cells into $U_G$.
+Before exiting the main loop, we copy the boundary of $U_i$ back to $U_G$. This needs to be done because at the start of the next time step, we're going to apply periodic boundary conditions, and that will only give the result we want if each thread has written its boundary cells into $U_G$.
 
 \begin{lstlisting}[language=C]
 // inside central2d_xrun(...) of stepper_parallel.c
@@ -189,7 +192,15 @@ Before exiting the main loop, we copy boundary of $U_i$ back to $U_G$. This need
     ...
 \end{lstlisting}
 
-Because of this last barrier directive in \texttt{central2d\_xrun}, we can use one of the time measurement to get an elapsed time. Have one section for proving the correctness of our solution, and the other one for writing $U_i$ to memory.
+The barrier directive is included so that threads do not start a new time step until every thread has written its boundary data to $U_G$.
+Once the main while loop in \texttt{xrun} completes, each thread writes its $U_i$ into $U_G$.
+We included another \texttt{barrier} directive after this step so that \texttt{xrun} does not return until every thread has finished writing to $U_G$.
+This is done so that, at the end of a time frame, $U_G$ stores the global state of the simulation.
+We can then use $U_G$ to run solution checks and print out to the visualizer.
+A consequence of this is that every thread returns from \texttt{xrun} at the same time.
+Therefore, we can use the time measurement from any one of the cells to evaluate the elapsed time.
+The solution check and visualizer steps can be done independently, and are, therefore, included in a sections directive.
+One section checks the correctness of our solution, and the other writes $U_G$ to the visualizer filer.
 
 \begin{lstlisting}[language=C]
 // ldriver_parallel.c
@@ -216,7 +227,7 @@ Because of this last barrier directive in \texttt{central2d\_xrun}, we can use o
 
 \section{Performance Analysis}
 
-Keep the same notation as above, where$p$ is the number of threads, and assume each thread is uniquely associated to a processor.
+Keep the same notation as above, where $p$ is the number of threads, and assume each thread is uniquely associated to a processor.
 
 \subsection{Strong Scaling}
 
@@ -228,7 +239,7 @@ To run weak scaling, we had to scale the problem size with respect to the number
 \begin{enumerate}
     \item Maintaining the square grid
 
-    To make sure that we could conduct weak scaling on a square grid data, we made a compromise by setting the grid’s height and width to be $\lfloor \sqrt{p} \rfloor \times 500$. We plot the scaled speedup in Figure 2. The scaled speedup hovered around 2 for $p \ge 2$ (the trendline did show that the scaled speedup increased linearly with respect to $p$ but the effect of $p$ is negligible for small $p$). Our finding was aligned with Gustafson’s Law, i.e, the scaled speedup is $O(p)$.
+    To make sure that we could conduct weak scaling on a square grid data, we made a compromise by setting the grid’s height and width to be $\lfloor \sqrt{p} \rfloor \times 500$. We plot the scaled speedup in Figure 2. The scaled speedup hovered around 2 for $p \ge 2$ (the trend line did show that the scaled speedup increased linearly with respect to $p$ but the effect of $p$ is negligible for small $p$). Our finding was aligned with Gustafson’s Law, i.e, the scaled speedup is $O(p)$.
 
     \item Keeping the amount of work per processor identical
 
@@ -239,7 +250,29 @@ To run weak scaling, we had to scale the problem size with respect to the number
 
 \subsection{Using OpenMP with MPI}
 
-We attempted using MPI along with OpenMP but we were not able to compile our code so we ended up simulating MPI using openmp.
+Originally, we planned to use a hybrid OpenMP and MPI approach.
+In this approach, we would have used MPI to partition the domain (which is a, in our opinion, a problem that is better suited for a distributed memory setup) and OpenMP to further parallelize the computations on each piece of the partition.
+This approach would allow us to run larger global grids.
+One downside to the implementation described above is that it relies on the existence of a global grid that can fit into memory.
+If the global grid is too large, it may not be possible to store the entire thing in memory simultaneously.
+Our approach with MPI promised to alleviate this bottleneck by forging the global grid altogether.
+
+In our MPI based approach, each processor would only hold its local grid.
+To make this work, we needed to rewrite our implementation so that it did not relied on a global grid.
+As described in previous sections, our implementation used the global grid as a repository through which the threads can communicate, to apply global periodic boundary conditions, to run the solution check, and to simply the visualizer code.
+Switching to MPI, therefore, required us to implement these features without a global grid.
+
+Some of these features were natural to implement in MPI.
+For example, to communicate between processors, we could have the processors send their boundary data directly to one another rather than using the global grid as a buffer.
+
+Others, however, were difficult to implement in MPI.
+In particular, the visualizer code posed an interesting challenge.
+Since there is only one visualizer file, data needs to be written to it as if it were being written row for row from a global grid.
+In our approach, a single row of the global grid could have been distributed over multiple processors.
+Therefore, getting the processors to write to the file as if it were written row for row from a global grid presented a complicated coordination problem.
+
+Unfortunately, we were not able to get these modifications finished before the original two week project deadline.
+As such, we stuck with our original OpenMP based approach.
 
 \subsection{Naively Inserting \text{\#pragma omp parallel}}
 
