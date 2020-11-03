@@ -30,16 +30,16 @@ keywordstyle=\color{codeblue},
 numberstyle=\tiny\color{codegray},
 stringstyle=\color{orange},
 basicstyle=\ttfamily \normalsize,
-breakatwhitespace=false,         
-breaklines=true,                 
-captionpos=b,                    
-keepspaces=true,                 
+breakatwhitespace=false,
+breaklines=true,
+captionpos=b,
+keepspaces=true,
 lineskip=0.2em,
-numbers=left,                    
-numbersep=5pt,                  
-showspaces=false,                
+numbers=left,
+numbersep=5pt,
+showspaces=false,
 showstringspaces=false,
-showtabs=false,                  
+showtabs=false,
 tabsize=2
 }
 
@@ -76,7 +76,11 @@ We used the GCC x.x.x (TODO: @Cheng can you specify any details about the compil
 \subsection{Overview}
 The first approach is to partition the grid data, $U_G$, into $N$ subgrids, $U_i$, each with its own start and end indices for both $x$ (horizontal) and $y$ (vertical) direction. In this report and our implementation, we will often refer to $U_i$ as a local grid, and $U_G$ as the global grid. Assume that each thread will handle each $U_i$ in a parallel manner. The overview below will overlook any parallelization aspect of the logic since more details about parallelization through OpenMP will come in the next section.
 
-Before processing each $U_i$, we first apply periodic boundary conditions to $U_G$ (this is the same as the originally provided work). This order of operation ensures that the ghost cells of $U_G$ can be easily pulled into those of each $U_i$. Then we can safely apply boundary conditions to each $U_i$ by copying over the ghost cells from $U_G$ to $U_i$.
+In the underlying CFD method, each cell is updated using the cells that directly neighbor it. In particular, this means that each thread needs to access cells of $U_G$ which lie outside of $U_i$ to update $U_i$ (specifically the cells which form the boundary of $U_i$). However, because information propagates through the simulation at a finite rate, each thread only needs to have access to the cells that directly neighbor its local grid. To enable this, each $U_i$ is padded with a few layers of ``Ghost'' cells, which hold a few layers of cells from other threads' local grids. These ghost cells are periodically updated to ensure that each thread can accurately update its local grid. As in Dr. Bindel's original code, the global grid is also padded with a few layers of ghost cells, but those are used to implement periodic boundary conditions.
+
+In our implementation, the global grid $U_G$ is used for two purposes: to implement boundary conditions, and to act as a repository through which the threads can communicate with one another. When the threads need to update the ghost cells in their local grid, they first push the outer few layers of their local grid to their corresponding locations in the global grid (these are the cells from $U_i$ that other threads need to access to update their local grids). Once this has finished, we apply periodic boundary conditions to $U_G$. This order of operation ensures that the ghost cells of $U_G$ can be easily pulled into those of each $U_i$. Then we can safely apply boundary conditions to each $U_i$ by copying over the relevant cells from $U_G$ into the ghost cells of $U_i$. ghost cells from $U_G$ to $U_i$.
+
+Thus, in our approach, the global grid exists, but only a tiny fraction of it is updated at each time step.  We decided to keep the global grid for this purpose, and because it allows us to easily write the state of the system at the end of each time frame for visualization purposes. This isn't the most memory-efficient approach, but it doesn't require much communication between the processors and was straight forward to implement in a shared memory environment.
 
 Once boundary conditions are applied, we compute the maximum wave speed in the $x$ and $y$ direction and determine $dt$. Unlike the original work, in which $dt$ is computed directly using $U_G$, we need to compute the maximum $x$ and $y$ velocities from each local grid and determine $dt_i$ for each $U_i$. Once all the computations are done, we determine $dt$ to be $\min\{dt_i\}_{i=1}^N$.
 
@@ -98,7 +102,7 @@ char* s = getenv("OMP_NUM_THREADS");
 int num_threads = 0;
 if (s != NULL) {
     num_threads = atoi(s);
-} 
+}
 
 if (num_threads == 0) {
     num_threads = 1;
@@ -146,7 +150,7 @@ As soon as we figure out $p$, the number of threads, we can initialize each $U_i
     // use omp_get_thread_num() to compute the sub grid location
     // call central2d_init(...)
     // initialize U_i, as shown in Section 3
-    
+
     // wait for all threads to set up their local arrays.
     #pragma omp barrier
     ...
@@ -193,10 +197,10 @@ Because of this last barrier directive in \texttt{central2d\_xrun}, we can use o
 {
     ...
     #pragma omp barrier
-    
+
     for (int i = 0; i < frames; ++i) {
         // measure time elapsed from central2d_run(...)
-        
+
         #pragma omp sections {
             #pragma omp section {
               // run out diagnostic on U_i by running solution_check(...)
@@ -223,19 +227,19 @@ To run weak scaling, we had to scale the problem size with respect to the number
 
 \begin{enumerate}
     \item Maintaining the square grid
-    
+
     To make sure that we could conduct weak scaling on a square grid data, we made a compromise by setting the grid’s height and width to be $\lfloor \sqrt{p} \rfloor \times 500$. We plot the scaled speedup in Figure 2. The scaled speedup hovered around 2 for $p \ge 2$ (the trendline did show that the scaled speedup increased linearly with respect to $p$ but the effect of $p$ is negligible for small $p$). Our finding was aligned with Gustafson’s Law, i.e, the scaled speedup is $O(p)$.
-    
+
     \item Keeping the amount of work per processor identical
-    
-    To ensure similar workload for each processor, we conducted weak scaling on grid data of size $500 \times 500p$ (violating the square grid assumption) so that each thread would operate on a grid data of size $500 \times 500$. We plotted the scaled speedup in Figure 3. Again, we found that the scaled speedup hovered around 2 for $p \ge 2$ with linear dependence with the number of threads. Our finding was yet again consistent with Gustafson’s Law.  
+
+    To ensure similar workload for each processor, we conducted weak scaling on grid data of size $500 \times 500p$ (violating the square grid assumption) so that each thread would operate on a grid data of size $500 \times 500$. We plotted the scaled speedup in Figure 3. Again, we found that the scaled speedup hovered around 2 for $p \ge 2$ with linear dependence with the number of threads. Our finding was yet again consistent with Gustafson’s Law.
 \end{enumerate}
 
 \section{Attempts That Didn't Work}
 
 \subsection{Using OpenMP with MPI}
 
-We attempted using MPI along with OpenMP but we were not able to compile our code so we ended up simulating MPI using openmp. 
+We attempted using MPI along with OpenMP but we were not able to compile our code so we ended up simulating MPI using openmp.
 
 \subsection{Naively Inserting \text{\#pragma omp parallel}}
 
