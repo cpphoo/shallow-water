@@ -241,13 +241,28 @@ We attempted using MPI along with OpenMP but we were not able to compile our cod
 
 We started the project by profiling the serial code provided using gprof (see Figure 4) and tried parallelizing a few functions using OpenMP. In particular, we tried adding \texttt{\#pragma omp parallel for} in three functions: \texttt{central2d\_correct\_sd}, \texttt{shallow\_2dv\_flux} and \texttt{shallow\_2dv\_speed} but we ended up with an implementation that is significantly worse than the serial code.
 
-% \begin{figure}[h!]
-% 	\centering
-% 	\includegraphics[width=0.8\columnwidth]{timing_jki_registering.pdf}
-% 	\caption{Flop rates with and without register allocating.}
-% 	\label{fig:Registering}
-% \end{figure}
+\begin{figure}[h!]
+	\centering
+	\includegraphics[width=0.8\columnwidth]{../strong_scaling.jpg}
+	\caption{Speedup for Strong Scaling Study}
+	\label{fig:strong_scaling}
+\end{figure}
 
+\begin{figure}[h!]
+	\centering
+	\includegraphics[width=0.8\columnwidth]{../weak_scaling.jpg}
+	\caption{Speedup for Weak Scaling (Square Grid)}
+	\label{fig:weak_scaling}
+\end{figure}
+
+\begin{figure}[h!]
+	\centering
+	\includegraphics[width=0.8\columnwidth]{../weak_scaling_v2.jpg}
+	\caption{Speedup for Weak Scaling (Constant Workload for Processor)}
+	\label{fig:weak_scaling_v2}
+\end{figure}
+
+TODO: add Output from Gprof diagram.
 
 \section{Conclusion}
 

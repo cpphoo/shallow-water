@@ -8,3 +8,8 @@ __pycache__/
 
 strong_scaling/
 weak_scaling
+
+# TeX outputs
+tex/*.aux
+tex/*.log
+tex/*.synctex.gz
