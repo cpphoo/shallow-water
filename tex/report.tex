@@ -59,35 +59,37 @@ tabsize=2
 
 \section{Introduction}
 
-In this project, we had tried various ways to optimize and tune the implementation of a finite volume solver for 2D hyperbolic PDEs via a high-resolution finite difference scheme by \href{http://www.cscamm.umd.edu/tadmor/pub/central-schemes/Jiang-Tadmor.SISSC-98.pdf}{Jiang and Tadmor}.
-Our approaches were built upon two central themes: sub-domain partitioning and parallelization using OpenMP. 
-Based on the performance analysis, the best tuning we had achieved a twofold speedup with only two processors (See \ref{sec: strong_scaling}). Our implementation can be found at: \url{https://github.com/cpphoo/shallow-water}.
+In this project, we had tried various ways to optimize and tune the implementation of a finite volume solver for 2D hyperbolic PDEs 
+via a high-resolution finite difference scheme by \href{http://www.cscamm.umd.edu/tadmor/pub/central-schemes/Jiang-Tadmor.SISSC-98.pdf}{Jiang and Tadmor}.
+Our approach is built upon two central themes: sub-domain partitioning and parallelization using OpenMP. 
+Based on the performance analysis, our final approach achieved a twofold speedup with only two processors (See \ref{sec: strong_scaling}). 
+Our implementation can be found at: \url{https://github.com/cpphoo/shallow-water}.
 
 \section{Sub-domain Partitioning}
 \label{sec: subdomain_partitioning}
-To start, assume the grid data was partitioned into $N$ sub-grids $\{U_i\}_{i=1}^N$.
-For this section, we focused on the high level implementation logic. We assumed 
+To start, assume the grid data is partitioned into $N$ sub-grids $\{U_i\}_{i=1}^N$.
+For this section, we focus on the high level implementation logic. We assume 
 that each sub-grids $U_i$ would be handled by a single thread in a parallel manner and 
-each thread had a deep copy of the sub-grid). 
+each thread has a deep copy of the sub-grid). 
 We defer details on OpenMP parallelization to the next section (section \ref{sec: parallelization}). 
 
 \subsection{Maintaining Sub-grids Consistency Via a Global Grid $U_G$}
 
-Given that the underlying CFD method updated each cell based on its adjacent cell, each thread needed to access cells that were outside of its respective grid $U_i$ for updates (i.e. the boundary of $U_i$). 
-Fortunately, each thread did not need access to all cells in its neighboring grids but rather a few cells that were adjacent to the boundary of its local sub-grid for updates.
-To ensure that each thread had access to the information needed to update the boundary cells, we padded each $U_i$ with a few layers of ``Ghost'' cells that held information of cells 
-needed for updates from other threads' sub-grids. We ensured the consistency of ``Ghost'' cells between different sub-grids by maintaining a global grid $U_G$ - a common repository 
+Given that the underlying CFD method updates each cell based on its adjacent cell, each thread needs to access cells that are outside of its respective grid $U_i$ for updates (i.e. the boundary of $U_i$). 
+Fortunately, each thread does not need access to all cells in its neighboring grids but rather a few cells that are adjacent to the boundary of its local sub-grid for updates.
+To ensure that each thread has access to the information needed to update the boundary cells, we pad each $U_i$ with a few layers of ``Ghost'' cells that hold information of cells 
+needed for updates from other threads' sub-grids. We ensure the consistency of ``Ghost'' cells between different sub-grids by maintaining a global grid $U_G$ - a common repository 
 through which the threads could communicate with one another.
 
-When the threads needed to update the ``Ghost'' cells in their local grid, they first pushed the outer few layers of their local grid to their corresponding locations in the global grid 
-(these were the cells from $U_i$ that other threads needed to access to update their local grids). Once this was finished, we applied periodic boundary conditions to $U_G$ and copied the values back 
-to the individual sub-grids. The order of operation ensured that the ``Ghost'' cells in each local sub-grids could be consistent and the boundary conditions of the original PDE were respected. 
+When the threads need to update the ``Ghost'' cells in their local grid, they first push the outer few layers of their local grid to their corresponding locations in the global grid 
+(these are the cells from $U_i$ that other threads need to access to update their local grids). Once this is finished, we apply periodic boundary conditions to $U_G$ and copy the values back 
+to the individual sub-grids. The order of operation ensures that the ``Ghost'' cells in each local sub-grids could be consistent and the boundary conditions of the original PDE are respected. 
 
 \subsection{Determining $dt$ for Finite Difference}
-Once the boundary conditions were applied and the changes were propagated back to the individual sub-grids, 
-we computed the maximum wave speed in the $x$ and $y$ direction and determine $dt$. 
-Different from the original work in which $dt$ was computed directly based on the whole grid, 
-we determined $dt$ by determining $dt_i$ for each $U_i$ (based on the $x-$, $y-$ velocity) and set 
+Once the boundary conditions are applied and the changes are propagated back to the individual sub-grids, 
+we compute the maximum wave speed in the $x$ and $y$ direction and determine $dt$. 
+Different from the original work in which $dt$ is computed directly based on the whole grid, 
+we determine $dt$ by determining $dt_i$ for each $U_i$ (based on the $x-$, $y-$ velocity) and set 
 $dt$ to be $\min\{dt_i\}_{i=1}^N$. 
 % The rest of the main loop logic were the same as the original work.
 % we need to compute the maximum $x$ and $y$ velocities from each local grid and determine $dt_i$ for each $U_i$. 
@@ -115,8 +117,8 @@ $dt$ to be $\min\{dt_i\}_{i=1}^N$.
 
 \subsection{Partitioning the Domain}
 We set the number of partitions $N$ to be the number of threads running $p$. For simplicity, we decided to split 
-the grid data row-wise. This allowed us to exploit the fact that the grid data (or matrices) followed row major ordering which  
-improved cache usage when the threads read from and wrote to $U_g$
+the grid data row-wise. This allows us to exploit the fact that the grid data (or matrices) follows row major ordering which  
+improves cache usage when the threads read from and write to $U_g$
 
 % In this section, we explained how the grid were partitioned and provided a few code snippets beneficial for understanding the implementation details discussed in this subsection. 
 % Interested readers were encouraged to check out our Github repository (\url{https://github.com/cpphoo/shallow-water}) for the full implementation 
@@ -177,14 +179,14 @@ improved cache usage when the threads read from and wrote to $U_g$
 
 \section{OpenMP Parallelization}
 \label{sec: parallelization}
-Sub-domain partitioning involved handling $N$ disjoint partitions that, in principle, could be processed in parallel. To enable parallelism, 
-we employ a shared memory model, OpenMP. In this section, we elaborated a few key implementations that enabled parallelization of sub-domain partitioning. 
+Sub-domain partitioning involves handling $N$ disjoint partitions that, in principle, can be processed in parallel. To enable parallelism, 
+we employ a shared memory model, OpenMP. In this section, we elaborate a few key implementations that enables parallelization of sub-domain partitioning. 
 % \texttt{\#pragma omp} directives are used to ensure proper setup of parallel processing of each thread.
 
 \subsection{Initialization of Each Thread}
-Once we figured out the number of threads $p$, we could initialize each $U_i$ by making a deep copy of partition of the original grid data. 
-After this, we would use the original grid data as our global grid $U_G$. Before the simulation was started, it was crucial to ensure that all threads finish up their $U_i$ initialization.
-This was implemented using a barrier. See below for a pseudocode of our thread initialization: 
+Once we determine the number of threads $p$, we initialize each $U_i$ by making a deep copy of partition of the original grid data. 
+After this, we use the original grid data as our global grid $U_G$. Before the simulation starts, it is crucial to ensure that all threads finish up their $U_i$ initialization.
+This is implemented using a barrier. See below for a pseudocode of our thread initialization: 
 
 \begin{lstlisting}[language=C]
 // ldriver_parallel.c
@@ -203,11 +205,11 @@ This was implemented using a barrier. See below for a pseudocode of our thread i
 \end{lstlisting}
 
 \subsection{Computing $dt$ via a Shared Buffer}
-To update each cell, we needed to compute $dt$ for the finite difference. To speedup the computation, 
-we attempted to parallelize computation as described in section \ref{sec: subdomain_partitioning} which required a shared 
+To update each cell, we need to compute $dt$ for the finite difference. To speed up the computation, 
+we attempted to parallelize computation as described in section \ref{sec: subdomain_partitioning} which requires a shared 
 memory buffer. As such, we let the first-arriving thread to create the shared buffer with a single directive 
 and store its local $dt$ in said buffer. For the rest of the threads, they would update the buffer if their local $dt$ is smaller than
-the value stored in the buffer.  We established a critical section when updating the buffer and set a barrier to wait for all threads 
+the value stored in the buffer.  We establish a critical section when updating the buffer and set a barrier to wait for all threads 
 to finish updating the buffer before proceeding. See below for a pseudocode of our implementation: 
 
 \begin{lstlisting}[language=C]
@@ -231,8 +233,8 @@ to finish updating the buffer before proceeding. See below for a pseudocode of o
 \end{lstlisting}
 
 \subsection{Respecting the Boundary Conditions}
-After each sub-grid were updated, we copied $U_i$ (on each thread) to the global grid $U_G$ so that 
-we could apply the periodic boundary conditions on the global grid. To make sure that $U_G$ was completely updated, we again establish 
+After each sub-grid are updated, we copy $U_i$ (on each thread) to the global grid $U_G$ so that 
+we could apply the periodic boundary conditions on the global grid. To make sure that $U_G$ are completely updated, we again establish 
 a barrier as shown as follows: 
 
 \begin{lstlisting}[language=C]
@@ -244,7 +246,7 @@ a barrier as shown as follows:
 \end{lstlisting}
 
 \subsection{Checking for Correctness and Generating Visualization}
-The solution check and visualization generation was performed on the global grid $U_G$.
+The solution check and visualization generation are performed on the global grid $U_G$.
 
 % The following is not necessary since it does not concern performance
 % The barrier directive is included so that threads do not start a new time step until every thread has written its boundary data to $U_G$.
@@ -281,7 +283,7 @@ The solution check and visualization generation was performed on the global grid
 % \end{lstlisting}
 
 \section{Performance Analysis}
-In this section, we assumed $p$ was the number of threads and each thread was uniquely associated to a processor.
+In this section, we assume $p$ is the number of threads and each thread is uniquely associated to a processor.
 
 \subsection{Strong Scaling}
 \label{sec: strong_scaling}
@@ -389,11 +391,18 @@ We used the GCC 5.5.0 compiler provided by Graphite. The four flags that we used
 \end{itemize}
 
 \section{Conclusion}
+To optimize and tune the implementation of the finite volume solver, we have applied two different strategies: 
+sub-domain partitioning that splits the grid data into sub-grids to ease computation and using OpenMP to parallelize 
+the computations (each thread handling a sub-grid).
+During this process, we overcame two difficulties: maintaining sub-grid consistency and synchronization of $dt$ among the sub-grids.
 
-To optimize and tune the implementation of the finite volume solver, we have applied two different strategies; through sub-domain partitioning, our implementation uses disjoint sub-grids to carry on the computation, each of which is handled parallelly via OpenMP directives. During this process, there were two technical difficulties to overcome: maintaining sub-grid consistency and synchronization of $dt$ among the sub-grids.
+Our performance analyses suggest that our optimization has doubled the performance with just two processors. 
+The experiment conducted with strong scaling aligns with Amdahl's Law (that inherently serial part of the code sets the upper bound of the speedup of parallel code), 
+and the experiments conducted with weak scaling aligns with Gustafson's Law (that the scaled speedup is linear with the number of processors).
 
-Our performance analysis results suggest that the best optimization has doubled the performance with just two processors. The experiment conducted with strong scaling aligns with Amdahl's Law (that inherently serial part of the code sets the upper bound of the speedup of parallel code), and the experiments conducted with weak scaling aligns with Gustafson's Law (that the scaled speedup is linear with the number of processors).
-
-Besides the aforementioned approaches, there were two additional attempts that were not as successful. First, a hybrid OpenMP and MPI strategy would have allowed us to run larger global grids, yet this approach could not be implemented due to an additional overhead of 1) rewriting our implementation that does not depend on the global grid and 2) resolving a complicated coordination problem during visualization. Second, naive insertion of \texttt{\#pragma omp parallel} directive had a significantly worse performance than the serial implementation.
+Besides the aforementioned approaches, there were two additional attempts that were not as successful. 
+First, a hybrid OpenMP and MPI strategy would have allowed us to run larger global grids, 
+yet this approach could not be implemented due to difficulties in rewriting our implementation that does not depend on the global grid and resolving a complicated coordination problem during visualization. 
+Second, naive insertion of \texttt{\#pragma omp parallel} directive had a significantly worse performance than the serial implementation.
 
 \end{document}
