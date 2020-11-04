@@ -59,9 +59,9 @@ tabsize=2
 
 \section{Introduction}
 
-In this project, we had tried various ways to optimize and tune the implementation of a finite volume solver for 2D hyperbolic PDEs via a high-resolution finite difference scheme (TODO: cite a reference to Jiang and Tadmor). 
+In this project, we had tried various ways to optimize and tune the implementation of a finite volume solver for 2D hyperbolic PDEs via a high-resolution finite difference scheme by \href{http://www.cscamm.umd.edu/tadmor/pub/central-schemes/Jiang-Tadmor.SISSC-98.pdf}{Jiang and Tadmor}.
 Our approaches were built upon two central themes: sub-domain partitioning and parallelization using OpenMP. 
-Based on the performance analysis, the best tuning we had achieved a twofold speedup with only two processors (See \ref{sec: strong_scaling}). Our implementation can be found at: \url{https://github.com/cpphoo/shallow-water}
+Based on the performance analysis, the best tuning we had achieved a twofold speedup with only two processors (See \ref{sec: strong_scaling}). Our implementation can be found at: \url{https://github.com/cpphoo/shallow-water}.
 
 \section{Sub-domain Partitioning}
 \label{sec: subdomain_partitioning}
@@ -346,7 +346,7 @@ Our approach with MPI promised to alleviate this bottleneck by forging the globa
 
 In our MPI based approach, each processor would only hold its local grid.
 To make this work, we needed to rewrite our implementation so that it did not relied on a global grid.
-As described in previous sections, our implementation used the global grid as a repository through which the threads could communicate, to apply global periodic boundary conditions, to run the solution check, and to simply the visualizer code.
+As described in previous sections, our implementation used the global grid as a repository through which the threads could communicate, to apply global periodic boundary conditions, to run the solution check, and to simplify the visualizer code.
 Switching to MPI, therefore, required us to implement these features without a global grid.
 
 Some of these features were natural to implement in MPI.
@@ -390,6 +390,10 @@ We used the GCC 5.5.0 compiler provided by Graphite. The four flags that we used
 
 \section{Conclusion}
 
-TODO: write a conclusion.
+To optimize and tune the implementation of the finite volume solver, we have applied two different strategies; through sub-domain partitioning, our implementation uses disjoint sub-grids to carry on the computation, each of which is handled parallelly via OpenMP directives. During this process, there were two technical difficulties to overcome: maintaining sub-grid consistency and synchronization of $dt$ among the sub-grids.
+
+Our performance analysis results suggest that the best optimization has doubled the performance with just two processors. The experiment conducted with strong scaling aligns with Amdahl's Law (that inherently serial part of the code sets the upper bound of the speedup of parallel code), and the experiments conducted with weak scaling aligns with Gustafson's Law (that the scaled speedup is linear with the number of processors).
+
+Besides the aforementioned approaches, there were two additional attempts that were not as successful. First, a hybrid OpenMP and MPI strategy would have allowed us to run larger global grids, yet this approach could not be implemented due to an additional overhead of 1) rewriting our implementation that does not depend on the global grid and 2) resolving a complicated coordination problem during visualization. Second, naive insertion of \texttt{\#pragma omp parallel} directive had a significantly worse performance than the serial implementation.
 
 \end{document}
