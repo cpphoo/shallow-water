@@ -13,3 +13,6 @@ weak_scaling
 tex/*.aux
 tex/*.log
 tex/*.synctex.gz
+tex/*.fls
+tex/*.out
+tex/*.fdb_latexmk

@@ -15,6 +15,8 @@
 \usepackage{xcolor}
 \usepackage[margin = 1 in]{geometry}
 
+\usepackage{hyperref}
+
 
 %New colors defined below
 \definecolor{codeblue}{rgb}{0,0.1,0.9}
@@ -48,7 +50,7 @@ tabsize=2
 
 
 \title{CS5220: Shallow Water Project}
-\author{Cheng Perng Phoo, Robert Stephany, Junyoung Lim}
+\author{Cheng Perng Phoo(cp598), Junyoung Lim (jl3248), Robert Stephany (rrs254)}
 \date{November 3, 2020}
 
 \begin{document}
@@ -57,102 +59,142 @@ tabsize=2
 
 \section{Introduction}
 
-In this project, we have tried various ways to optimize and tune the implementation of a finite volume solver for 2D hyperbolic PDEs via a high-resolution finite difference scheme (TODO: cite a reference to Jiang and Tadmor). Our approaches are built upon two central themes: sub-domain partitioning and parallelization using OpenMP. Based on the performance analysis, the best tuning we have achieved has (TODO: one-two lines summary of the performance result).
+In this project, we had tried various ways to optimize and tune the implementation of a finite volume solver for 2D hyperbolic PDEs via a high-resolution finite difference scheme (TODO: cite a reference to Jiang and Tadmor). 
+Our approaches were built upon two central themes: sub-domain partitioning and parallelization using OpenMP. 
+Based on the performance analysis, the best tuning we had achieved a twofold speedup with only two processors (See \ref{sec: strong_scaling}). Our implementation can be found at: \url{https://github.com/cpphoo/shallow-water}
 
-\section{Discussion: Compilation Details}
+\section{Sub-domain Partitioning}
+\label{sec: subdomain_partitioning}
+To start, assume the grid data was partitioned into $N$ sub-grids $\{U_i\}_{i=1}^N$.
+For this section, we focused on the high level implementation logic. We assumed 
+that each sub-grids $U_i$ would be handled by a single thread in a parallel manner and 
+each thread had a deep copy of the sub-grid). 
+We defer details on OpenMP parallelization to the next section (section \ref{sec: parallelization}). 
 
-Although we used different environments (Mac, Ubuntu, Arch) for local testing and debugging, the profiling and performance analysis have been done on Graphite. Here in this section, we discuss the compilation configurations we used.
+\subsection{Maintaining Sub-grids Consistency Via a Global Grid $U_G$}
 
-We used the GCC x.x.x (TODO: @Cheng can you specify any details about the compiler version here if there is any?) compiler provided by Graphite. The four flags that we used for the compilation are the following:
-\begin{itemize}
-	\item \texttt{-O3} --- Performs more aggressive optimization than \texttt{-O2} used by default.
-	\item \texttt{-ffast-math} --- Enables the compiler to reorder operations that may not actually be associative.
-	\item \texttt{-fopenmp} --- Enables the OpenMP directive \texttt{\#pragma omp} in our C code for shared memory parallel processing.
-	\item \texttt{-march=native} --- Optimizes the code for the specific machine architecture.
-\end{itemize}
+Given that the underlying CFD method updated each cell based on its adjacent cell, each thread needed to access cells that were outside of its respective grid $U_i$ for updates (i.e. the boundary of $U_i$). 
+Fortunately, each thread did not need access to all cells in its neighboring grids but rather a few cells that were adjacent to the boundary of its local sub-grid for updates.
+To ensure that each thread had access to the information needed to update the boundary cells, we padded each $U_i$ with a few layers of ``Ghost'' cells that held information of cells 
+needed for updates from other threads' sub-grids. We ensured the consistency of ``Ghost'' cells between different sub-grids by maintaining a global grid $U_G$ - a common repository 
+through which the threads could communicate with one another.
 
-\section{Discussion: Sub-domain Partitioning}
+When the threads needed to update the ``Ghost'' cells in their local grid, they first pushed the outer few layers of their local grid to their corresponding locations in the global grid 
+(these were the cells from $U_i$ that other threads needed to access to update their local grids). Once this was finished, we applied periodic boundary conditions to $U_G$ and copied the values back 
+to the individual sub-grids. The order of operation ensured that the ``Ghost'' cells in each local sub-grids could be consistent and the boundary conditions of the original PDE were respected. 
 
-\subsection{Overview}
-The first approach is to partition the grid data, $U_G$, into $N$ sub-grids, $U_i$, each with its own start and end indices for both $x$ (horizontal) and $y$ (vertical) direction. In this report and our implementation, we will often refer to $U_i$ as a local grid, and $U_G$ as the global grid. Assume that each thread will handle each $U_i$ in a parallel manner. The overview below will overlook any parallelization aspect of the logic since more details about parallelization through OpenMP will come in the next section.
+\subsection{Determining $dt$ for Finite Difference}
+Once the boundary conditions were applied and the changes were propagated back to the individual sub-grids, 
+we computed the maximum wave speed in the $x$ and $y$ direction and determine $dt$. 
+Different from the original work in which $dt$ was computed directly based on the whole grid, 
+we determined $dt$ by determining $dt_i$ for each $U_i$ (based on the $x-$, $y-$ velocity) and set 
+$dt$ to be $\min\{dt_i\}_{i=1}^N$. 
+% The rest of the main loop logic were the same as the original work.
+% we need to compute the maximum $x$ and $y$ velocities from each local grid and determine $dt_i$ for each $U_i$. 
+% Once all the computations are done, we determine $dt$ to be $\min\{dt_i\}_{i=1}^N$.
+% The rest of the main loop logic were the same as the original work
+% , except that we need to make sure that copy the boundary of each local grid to the corresponding 
+% location in the global grid. Then proceed to the next iteration of the loop only after all the boundaries are copied over.
 
-In the underlying CFD method, each cell is updated using the cells that directly neighbor it. In particular, this means that each thread needs to access cells of $U_G$ which lie outside of $U_i$ to update $U_i$ (specifically the cells which form the boundary of $U_i$). However, because information propagates through the simulation at a finite rate, each thread only needs to have access to the cells that directly neighbor its local grid. To enable this, each $U_i$ is padded with a few layers of ``Ghost'' cells, which hold a few layers of cells from other threads' local grids. These ghost cells are periodically updated to ensure that each thread can accurately update its local grid. As in Dr. Bindel's original code, the global grid is also padded with a few layers of ghost cells, but those are used to implement periodic boundary conditions.
+% This order of operation ensured that the ghost cells of $U_G$ can be easily pulled into those of each $U_i$ Then we can safely apply boundary conditions to each $U_i$ by copying over the relevant cells from $U_G$ into the ghost cells of $U_i$. ghost cells from $U_G$ to $U_i$.
 
-In our implementation, the global grid $U_G$ is used for two purposes: to implement boundary conditions, and to act as a repository through which the threads can communicate with one another. When the threads need to update the ghost cells in their local grid, they first push the outer few layers of their local grid to their corresponding locations in the global grid (these are the cells from $U_i$ that other threads need to access to update their local grids). Once this has finished, we apply periodic boundary conditions to $U_G$. This order of operation ensures that the ghost cells of $U_G$ can be easily pulled into those of each $U_i$. Then we can safely apply boundary conditions to each $U_i$ by copying over the relevant cells from $U_G$ into the ghost cells of $U_i$. ghost cells from $U_G$ to $U_i$.
 
-Thus, in our approach, the global grid exists, but only a tiny fraction of it is updated at each time step.  We decided to keep the global grid for this purpose, and because it allows us to easily write the state of the system at the end of each time frame for visualization purposes. This isn't the most memory-efficient approach, but it doesn't require much communication between the processors and was straight forward to implement in a shared memory environment.
+% The 
 
-Once boundary conditions are applied, we compute the maximum wave speed in the $x$ and $y$ direction and determine $dt$. Unlike the original work, in which $dt$ is computed directly using $U_G$, we need to compute the maximum $x$ and $y$ velocities from each local grid and determine $dt_i$ for each $U_i$. Once all the computations are done, we determine $dt$ to be $\min\{dt_i\}_{i=1}^N$.
 
-The rest of the main loop logic is the same as the original work, except that we need to make sure that copy the boundary of each local grid to the corresponding location in the global grid. Then proceed to the next iteration of the loop only after all the boundaries are copied over.
+% These ghost cells are periodically updated to ensure that each thread can accurately update its local grid. 
+% % As in Dr. Bindel's original code, the global grid is also padded with a few layers of ghost cells, but those are used to implement periodic boundary conditions.
 
-\subsection{Implementation Details}
+% In our implementation, the global grid $U_G$ is used for two purposes: to implement boundary conditions, and to
+  
 
-Only some of the noteworthy code snippets, which will help understanding the implementation details, are discussed in this section. The interested reader is encouraged to see our full implementation on our Github repository, which includes myriad comments for clear exposition.
+% Thus, in our approach, the global grid exists, but only a tiny fraction of it is updated at each time step. 
+%  We decided to keep the global grid for this purpose, and because it allows us to easily write the state of the system at the end of each time frame for visualization purposes. 
+%  This isn't the most memory-efficient approach, but it doesn't require much communication between the processors and was straight forward to implement in a shared memory environment.
 
-In order to apply the idea of sub-domain partitioning, we need to determine $N$, the number of partitions to create. To generalize our logic, we dynamically determine the number of partitions at runtime by detecting $p$, the number of threads running, and let $N = p$.
 
+\subsection{Partitioning the Domain}
+We set the number of partitions $N$ to be the number of threads running $p$. For simplicity, we decided to split 
+the grid data row-wise. This allowed us to exploit the fact that the grid data (or matrices) followed row major ordering which  
+improved cache usage when the threads read from and wrote to $U_g$
+
+% In this section, we explained how the grid were partitioned and provided a few code snippets beneficial for understanding the implementation details discussed in this subsection. 
+% Interested readers were encouraged to check out our Github repository (\url{https://github.com/cpphoo/shallow-water}) for the full implementation 
+% which included myriad comments for clear exposition. To start, we set the number of sub-grids $N$ as the number of threads
+
+
+% we needed to determine the number of subgrids we we would like to create
+% In order to apply sub-domain partitioning, we need to determine $N$, the number of partitions to create. 
+% To generalize our logic, we dynamically determine the number of partitions at runtime by detecting $p$, the number of threads running, and let $N = p$.
+
+
+% \begin{lstlisting}[language=C]
+% // ldriver_parallel.c
+% // First get the number of threads from the environment
+% // If the number of threads is null, then set the number of threads to 1
+% char* s = getenv("OMP_NUM_THREADS");
+
+% int num_threads = 0;
+% if (s != NULL) {
+%     num_threads = atoi(s);
+% }
+
+% if (num_threads == 0) {
+%     num_threads = 1;
+% }
+
+% printf("Number of threads: %d\n", num_threads);
+% const int n_rows = num_threads;
+% const int n_cols = 1;
+% \end{lstlisting}
+
+% \texttt{n\_row} and \texttt{n\_col}, are used to calculate two variables, \texttt{xlow\_local} and \texttt{ylow\_local}.
+% \texttt{xlow\_local} specifies which row of $U_G$ the bottom row of $U_i$ corresponds to. \texttt{ylow\_local} specifies which column of $U_G$ the left column of $U_i$ corresponds to.
+% These variables are used to compute the location (\texttt{nx\_local} and \texttt{ny\_local}) in $U_G$ that corresponds to each cell of $U_i$.
+% Note that $\texttt{n\_row} = N$ and $\texttt{n\_col} = 1$, because we are exploiting the fact that matrices follow row major ordering in our code. This approach will, therefore, improve cache usage when threads read from and write to $U_g$. We initialize each $U_i$ as shown below.
+
+% \begin{lstlisting}[language=C]
+% // ldriver_parallel.c
+% float* U_local = sim_local->U;
+% float* U = sim -> U;
+% for(int k = 0; k < 3; ++k) {  // 3 = nfield
+%   for(int iy = 0; iy < ny_local; ++iy) {
+%     for(int ix = 0; ix < nx_local; ++ix) {
+%       U_local[central2d_offset(sim_local, k, ix, iy)]
+%         = U[central2offset(sim, k, xlow_local + ix, ylow_local + iy)];
+%     }
+%   }
+% }
+% \end{lstlisting}
+
+% \texttt{stepper\_parallel.c} contains the main logic described in the overview. In addition to the provided functions, we introduce three new functions, each with the following functionalities:
+
+% \begin{itemize}
+% 	\item \texttt{central2d\_local\_BC} --- Used to fetch $U_i$'s ghost cells from $U_g$.
+% 	\item \texttt{central2d\_local\_to\_global} --- Copies the boundary of $U_i$ back to $U_G$.
+% 	\item \texttt{central2d\_U\_to\_global\_U} --- Copies the canonical cells of $U_i$ back to corresponding locations in $U_G$.
+% \end{itemize}
+
+\section{OpenMP Parallelization}
+\label{sec: parallelization}
+Sub-domain partitioning involved handling $N$ disjoint partitions that, in principle, could be processed in parallel. To enable parallelism, 
+we employ a shared memory model, OpenMP. In this section, we elaborated a few key implementations that enabled parallelization of sub-domain partitioning. 
+% \texttt{\#pragma omp} directives are used to ensure proper setup of parallel processing of each thread.
+
+\subsection{Initialization of Each Thread}
+Once we figured out the number of threads $p$, we could initialize each $U_i$ by making a deep copy of partition of the original grid data. 
+After this, we would use the original grid data as our global grid $U_G$. Before the simulation was started, it was crucial to ensure that all threads finish up their $U_i$ initialization.
+This was implemented using a barrier. See below for a pseudocode of our thread initialization: 
 
 \begin{lstlisting}[language=C]
 // ldriver_parallel.c
-// First get the number of threads from the environment
-// If the number of threads is null, then set the number of threads to 1
-char* s = getenv("OMP_NUM_THREADS");
-
-int num_threads = 0;
-if (s != NULL) {
-    num_threads = atoi(s);
-}
-
-if (num_threads == 0) {
-    num_threads = 1;
-}
-
-printf("Number of threads: %d\n", num_threads);
-const int n_rows = num_threads;
-const int n_cols = 1;
-\end{lstlisting}
-
-\texttt{n\_row} and \texttt{n\_col}, are used to calculate two variables, \texttt{xlow\_local} and \texttt{ylow\_local}.
-\texttt{xlow\_local} specifies which row of $U_G$ the bottom row of $U_i$ corresponds to. \texttt{ylow\_local} specifies which column of $U_G$ the left column of $U_i$ corresponds to.
-These variables are used to compute the location (\texttt{nx\_local} and \texttt{ny\_local}) in $U_G$ that corresponds to each cell of $U_i$.
-Note that $\texttt{n\_row} = N$ and $\texttt{n\_col} = 1$, because we are exploiting the fact that matrices follow row major ordering in our code. This approach will, therefore, improve cache usage when threads read from and write to $U_g$. We initialize each $U_i$ as shown below.
-
-\begin{lstlisting}[language=C]
-// ldriver_parallel.c
-float* U_local = sim_local->U;
-float* U = sim -> U;
-for(int k = 0; k < 3; ++k) {  // 3 = nfield
-  for(int iy = 0; iy < ny_local; ++iy) {
-    for(int ix = 0; ix < nx_local; ++ix) {
-      U_local[central2d_offset(sim_local, k, ix, iy)]
-        = U[central2offset(sim, k, xlow_local + ix, ylow_local + iy)];
-    }
-  }
-}
-\end{lstlisting}
-
-\texttt{stepper\_parallel.c} contains the main logic described in the overview. In addition to the provided functions, we introduce three new functions, each with the following functionalities:
-
-\begin{itemize}
-	\item \texttt{central2d\_local\_BC} --- Used to fetch $U_i$'s ghost cells from $U_g$.
-	\item \texttt{central2d\_local\_to\_global} --- Copies the boundary of $U_i$ back to $U_G$.
-	\item \texttt{central2d\_U\_to\_global\_U} --- Copies the canonical cells of $U_i$ back to corresponding locations in $U_G$.
-\end{itemize}
-
-\section{Discussion: OpenMP Parallelization}
-
-The aforementioned sub-domain partitioning involves handling $N$ disjoint partitions, each of which can be handled in parallel. \texttt{\#pragma omp} directives are used to ensure proper setup of parallel processing of each thread.
-
-Once we figure out $p$, the number of threads, we can initialize each $U_i$ and its corresponding location in the global grid $U_G$ from the thread number assuming row-wise partitioning. It's necessary to set the barrier before running a simulation so that all threads finish up their $U_i$ initialization.
-
-\begin{lstlisting}[language=C]
-// ldriver_parallel.c
+// n_rows = p
+// n_cols = 1
 #pragma omp parallel num_threads(n_rows*n_cols)
 {
     // use omp_get_thread_num() to compute the sub grid location
     // call central2d_init(...)
-    // initialize U_i, as shown in Section 3
+    // initialize the U_i for each thread
 
     // wait for all threads to set up their local arrays.
     #pragma omp barrier
@@ -160,7 +202,13 @@ Once we figure out $p$, the number of threads, we can initialize each $U_i$ and 
 }
 \end{lstlisting}
 
-Once all threads are ready with their initialization phase, run the simulation for each frame. By the time it needs to compute $dt$ from the maximum $x$ and $y$ velocities as described above, we can parallelize the operation by letting the first-arriving thread to create a shared buffer (with a single directive). Then each thread $T_i$ arrives and writes the minimum between $dt_i$ and the value already stored in the shared buffer. Wait until all threads are completed, and move on.
+\subsection{Computing $dt$ via a Shared Buffer}
+To update each cell, we needed to compute $dt$ for the finite difference. To speedup the computation, 
+we attempted to parallelize computation as described in section \ref{sec: subdomain_partitioning} which required a shared 
+memory buffer. As such, we let the first-arriving thread to create the shared buffer with a single directive 
+and store its local $dt$ in said buffer. For the rest of the threads, they would update the buffer if their local $dt$ is smaller than
+the value stored in the buffer.  We established a critical section when updating the buffer and set a barrier to wait for all threads 
+to finish updating the buffer before proceeding. See below for a pseudocode of our implementation: 
 
 \begin{lstlisting}[language=C]
 // inside central2d_xrun(...) of stepper_parallel.c
@@ -182,7 +230,10 @@ Once all threads are ready with their initialization phase, run the simulation f
     ...
 \end{lstlisting}
 
-Before exiting the main loop, we copy the boundary of $U_i$ back to $U_G$. This needs to be done because at the start of the next time step, we're going to apply periodic boundary conditions, and that will only give the result we want if each thread has written its boundary cells into $U_G$.
+\subsection{Respecting the Boundary Conditions}
+After each sub-grid were updated, we copied $U_i$ (on each thread) to the global grid $U_G$ so that 
+we could apply the periodic boundary conditions on the global grid. To make sure that $U_G$ was completely updated, we again establish 
+a barrier as shown as follows: 
 
 \begin{lstlisting}[language=C]
 // inside central2d_xrun(...) of stepper_parallel.c
@@ -192,74 +243,110 @@ Before exiting the main loop, we copy the boundary of $U_i$ back to $U_G$. This 
     ...
 \end{lstlisting}
 
-The barrier directive is included so that threads do not start a new time step until every thread has written its boundary data to $U_G$.
-Once the main while loop in \texttt{xrun} completes, each thread writes its $U_i$ into $U_G$.
-We included another \texttt{barrier} directive after this step so that \texttt{xrun} does not return until every thread has finished writing to $U_G$.
-This is done so that, at the end of a time frame, $U_G$ stores the global state of the simulation.
-We can then use $U_G$ to run solution checks and print out to the visualizer.
-A consequence of this is that every thread returns from \texttt{xrun} at the same time.
-Therefore, we can use the time measurement from any one of the cells to evaluate the elapsed time.
-The solution check and visualizer steps can be done independently, and are, therefore, included in a sections directive.
-One section checks the correctness of our solution, and the other writes $U_G$ to the visualizer filer.
+\subsection{Checking for Correctness and Generating Visualization}
+The solution check and visualization generation was performed on the global grid $U_G$.
 
-\begin{lstlisting}[language=C]
-// ldriver_parallel.c
-#pragma omp parallel num_threads(n_rows*n_cols)
-{
-    ...
-    #pragma omp barrier
+% The following is not necessary since it does not concern performance
+% The barrier directive is included so that threads do not start a new time step until every thread has written its boundary data to $U_G$.
+% Once the main while loop in \texttt{xrun} completes, each thread writes its $U_i$ into $U_G$.
+% We included another \texttt{barrier} directive after this step so that \texttt{xrun} does not return until every thread has finished writing to $U_G$.
+% This is done so that, at the end of a time frame, $U_G$ stores the global state of the simulation.
+% We can then use $U_G$ to run solution checks and print out to the visualizer.
+% A consequence of this is that every thread returns from \texttt{xrun} at the same time.
+% Therefore, we can use the time measurement from any one of the cells to evaluate the elapsed time.
+% The solution check and visualizer steps can be done independently, and are, therefore, included in a sections directive.
+% One section checks the correctness of our solution, and the other writes $U_G$ to the visualizer filer.
 
-    for (int i = 0; i < frames; ++i) {
-        // measure time elapsed from central2d_run(...)
+% \begin{lstlisting}[language=C]
+% // ldriver_parallel.c
+% #pragma omp parallel num_threads(n_rows*n_cols)
+% {
+%     ...
+%     #pragma omp barrier
 
-        #pragma omp sections {
-            #pragma omp section {
-              // run out diagnostic on U_i by running solution_check(...)
-            }
-            #pragma omp section {
-              //  write a frame of U to memory by running viz_frame(...);
-            }
-        }
-    }
-    ...
-}
-\end{lstlisting}
+%     for (int i = 0; i < frames; ++i) {
+%         // measure time elapsed from central2d_run(...)
+
+%         #pragma omp sections {
+%             #pragma omp section {
+%               // run out diagnostic on U_i by running solution_check(...)
+%             }
+%             #pragma omp section {
+%               //  write a frame of U to memory by running viz_frame(...);
+%             }
+%         }
+%     }
+%     ...
+% }
+% \end{lstlisting}
 
 \section{Performance Analysis}
-
-Keep the same notation as above, where $p$ is the number of threads, and assume each thread is uniquely associated to a processor.
+In this section, we assumed $p$ was the number of threads and each thread was uniquely associated to a processor.
 
 \subsection{Strong Scaling}
+\label{sec: strong_scaling}
+We performed strong scaling on Graphite. In particular, we set the problem size to be $nx = ny = 1000$ and ran our implementation for $p = 1, 2, 3, \ldots, 10$. 
+We computed the speedup as $T_{serial} / T_{parallel}$ where $T_{serial}$ was benchmarked using the initial code released to us. 
+We plotted the speedup against the number of threads in figure \ref{fig:strong_scaling}. 
+Our strong scaling plot demonstrated a close to linear scaling for the number of threads less than or equal to 5 but the speedup tapered off 
+as we increased the number of threads due to inparallelizable portion of the code.
+Our finding aligned with Amdahl’s Law, i.e, there always exists some code that is inherently serial and hard to parallelize and those serial work upper bound the speedup of parallel code.
 
-We performed strong scaling on Graphite. In particular, we set the problem size to be $nx = ny = 1000$ and ran our implementation for $p = 1, 2, 3, \ldots, 10$. We compute the speedup as $T_{serial} / T_{parallel}$ where $T_{serial}$ was benchmarked using the initial code released to us. We plotted the speedup against the number of threads in figure 1. Our strong scaling plot demonstrated a close to linear scaling for the number of threads less than or equal to 5 but the speedup tapered off as increased the number of threads. Our finding aligned with Amdahl’s Law, i.e, there always exists some code that is inherently serial and hard to parallelize and those serial work upper bound the speedup of parallel code.
+\begin{figure}[h!]
+	\centering
+	\includegraphics[width=0.8\columnwidth]{../strong_scaling.jpg}
+	\caption{Speedup for Strong Scaling Study}
+	\label{fig:strong_scaling}
+\end{figure}
+
 
 \subsection{Weak Scaling}
-To run weak scaling, we had to scale the problem size with respect to the number of threads such that the amount of work per processor is identical for each thread. However, this will be hard to achieve if we want to maintain a square grid data. For instance, suppose we conduct weak scaling on a single thread on a grid of size $h \times h$, then to run weak scaling with 2 threads, we have to run on a grid of size $2h \times h$ or $h \times 2h$ which is no longer a square grid. As such, we conducted two variants of weak scaling:
+To run weak scaling, we had to scale the problem size with respect to the number of threads such that the amount of work per processor is identical for each thread. 
+However, this would be be hard to achieve if we wanted to maintain a square grid data. 
+For instance, suppose we conducted weak scaling on a single thread on a grid of size $h \times h$, then to run weak scaling with 2 threads, 
+we have to run on a grid of size $2h \times h$ or $h \times 2h$ which was no longer a square grid. As such, we conducted two variants of weak scaling:
 
 \begin{enumerate}
     \item Maintaining the square grid
-
-    To make sure that we could conduct weak scaling on a square grid data, we made a compromise by setting the grid’s height and width to be $\lfloor \sqrt{p} \rfloor \times 500$. We plot the scaled speedup in Figure 2. The scaled speedup hovered around 2 for $p \ge 2$ (the trend line did show that the scaled speedup increased linearly with respect to $p$ but the effect of $p$ is negligible for small $p$). Our finding was aligned with Gustafson’s Law, i.e, the scaled speedup is $O(p)$.
+    \newline
+    To make sure that we could conduct weak scaling on a square grid data, we made a compromise by setting the grid’s height and width to be $\lfloor \sqrt{p} \rfloor \times 500$. 
+    We plot the scaled speedup in figure \ref{fig:weak_scaling}. The scaled speedup hovered around 2 for $p \ge 2$ (the trend line did show that the scaled speedup increased linearly with respect to $p$ but the effect of $p$ is negligible for small $p$). 
+    Our finding was consistent with Gustafson’s Law, i.e, the scaled speedup is $O(p)$.
 
     \item Keeping the amount of work per processor identical
 
-    To ensure similar workload for each processor, we conducted weak scaling on grid data of size $500 \times 500p$ (violating the square grid assumption) so that each thread would operate on a grid data of size $500 \times 500$. We plotted the scaled speedup in Figure 3. Again, we found that the scaled speedup hovered around 2 for $p \ge 2$ with linear dependence with the number of threads. Our finding was yet again consistent with Gustafson’s Law.
+    To ensure similar workload for each processor, we conducted weak scaling on grid data of size $500 \times 500p$ (violating the square grid assumption) so that each thread would operate on a grid data of size $500 \times 500$. 
+    We plotted the scaled speedup in figure \ref{fig:weak_scaling_v2}. Again, we found that the scaled speedup hovered around 2 for $p \ge 2$ with linear dependence with the number of threads. 
+    Our finding was again consistent with Gustafson’s Law.
 \end{enumerate}
+\begin{figure}[h!]
+	\centering
+	\includegraphics[width=0.8\columnwidth]{../weak_scaling.jpg}
+	\caption{Speedup for Weak Scaling (Square Grid)}
+	\label{fig:weak_scaling}
+\end{figure}
 
-\section{Attempts That Didn't Work}
+\begin{figure}[h!]
+	\centering
+	\includegraphics[width=0.8\columnwidth]{../weak_scaling_v2.jpg}
+	\caption{Speedup for Weak Scaling (Constant Workload for Processor)}
+	\label{fig:weak_scaling_v2}
+\end{figure}
 
+\section{Failed Attempts}
+In this section, we elaborated on our failed attempts. 
 \subsection{Using OpenMP with MPI}
-
-Originally, we planned to use a hybrid OpenMP and MPI approach.
-In this approach, we would have used MPI to partition the domain (which is a, in our opinion, a problem that is better suited for a distributed memory setup) and OpenMP to further parallelize the computations on each piece of the partition.
+Originally, we planned to use a hybrid OpenMP and MPI strategy.
+Via this strategy, we would have used MPI to partition the domain (which in our opinion, is a problem that is better suited for a distributed memory setup) 
+and OpenMP to further parallelize the computations on each piece of the partition.
 This approach would allow us to run larger global grids.
-One downside to the implementation described above is that it relies on the existence of a global grid that can fit into memory.
+One downside to the implementation described above was that it relies on the existence of a global grid that can fit into memory.
 If the global grid is too large, it may not be possible to store the entire thing in memory simultaneously.
 Our approach with MPI promised to alleviate this bottleneck by forging the global grid altogether.
 
 In our MPI based approach, each processor would only hold its local grid.
 To make this work, we needed to rewrite our implementation so that it did not relied on a global grid.
-As described in previous sections, our implementation used the global grid as a repository through which the threads can communicate, to apply global periodic boundary conditions, to run the solution check, and to simply the visualizer code.
+As described in previous sections, our implementation used the global grid as a repository through which the threads could communicate, to apply global periodic boundary conditions, to run the solution check, and to simply the visualizer code.
 Switching to MPI, therefore, required us to implement these features without a global grid.
 
 Some of these features were natural to implement in MPI.
@@ -276,30 +363,30 @@ As such, we stuck with our original OpenMP based approach.
 
 \subsection{Naively Inserting \text{\#pragma omp parallel}}
 
-We started the project by profiling the serial code provided using gprof (see Figure 4) and tried parallelizing a few functions using OpenMP. In particular, we tried adding \texttt{\#pragma omp parallel for} in three functions: \texttt{central2d\_correct\_sd}, \texttt{shallow\_2dv\_flux} and \texttt{shallow\_2dv\_speed} but we ended up with an implementation that is significantly worse than the serial code.
+We started the project by profiling the serial code provided using gprof (see figure \ref{fig:gprof}) and tried parallelizing a few functions using OpenMP. 
+In particular, we tried adding \texttt{\#pragma omp parallel for} in three functions: \texttt{central2d\_correct\_sd}, \texttt{shallow\_2dv\_flux} and \texttt{shallow\_2dv\_speed} 
+but we ended up with an implementation that were significantly slower than the serial code.
+
 
 \begin{figure}[h!]
 	\centering
-	\includegraphics[width=0.8\columnwidth]{../strong_scaling.jpg}
-	\caption{Speedup for Strong Scaling Study}
-	\label{fig:strong_scaling}
+	\includegraphics[width=0.8\columnwidth]{../gprof_profile.png}
+	\caption{Output from profiling the serial code using gprof.}
+	\label{fig:gprof}
 \end{figure}
 
-\begin{figure}[h!]
-	\centering
-	\includegraphics[width=0.8\columnwidth]{../weak_scaling.jpg}
-	\caption{Speedup for Weak Scaling (Square Grid)}
-	\label{fig:weak_scaling}
-\end{figure}
+\section{Compilation Details}
 
-\begin{figure}[h!]
-	\centering
-	\includegraphics[width=0.8\columnwidth]{../weak_scaling_v2.jpg}
-	\caption{Speedup for Weak Scaling (Constant Workload for Processor)}
-	\label{fig:weak_scaling_v2}
-\end{figure}
+Although we used different environments (Mac, Ubuntu, Arch) for local testing, profiling and debugging, 
+the performance analysis was been done on Graphite. In this section, we discuss the compilation configurations we used.
 
-TODO: add Output from Gprof diagram.
+We used the GCC 5.5.0 compiler provided by Graphite. The four flags that we used for the compilation are the following:
+\begin{itemize}
+	\item \texttt{-O3} --- Performs more aggressive optimization than \texttt{-O2} used by default.
+	\item \texttt{-ffast-math} --- Enables the compiler to reorder operations that may not actually be associative.
+	\item \texttt{-fopenmp} --- Enables the OpenMP directive \texttt{\#pragma omp} in our C code for shared memory parallel processing.
+	\item \texttt{-march=native} --- Optimizes the code for the specific machine architecture.
+\end{itemize}
 
 \section{Conclusion}
 
